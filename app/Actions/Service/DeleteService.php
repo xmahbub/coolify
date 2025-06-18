@@ -4,6 +4,7 @@ namespace App\Actions\Service;
 
 use App\Actions\Server\CleanupDocker;
 use App\Models\Service;
+use Illuminate\Support\Facades\Log;
 use Lorisleiva\Actions\Concerns\AsAction;
 
 class DeleteService
@@ -39,23 +40,23 @@ class DeleteService
                 if (! empty($commands)) {
                     foreach ($commands as $command) {
                         $result = instant_remote_process([$command], $server, false);
-                        if ($result !== 0) {
-                            ray("Failed to execute: $command");
+                        if ($result !== null && $result !== 0) {
+                            Log::error('Error deleting volumes: '.$result);
                         }
                     }
                 }
             }
 
             if ($deleteConnectedNetworks) {
-                $service->delete_connected_networks($service->uuid);
+                $service->deleteConnectedNetworks();
             }
 
             instant_remote_process(["docker rm -f $service->uuid"], $server, throwError: false);
         } catch (\Exception $e) {
-            throw new \Exception($e->getMessage());
+            throw new \RuntimeException($e->getMessage());
         } finally {
             if ($deleteConfigurations) {
-                $service->delete_configurations();
+                $service->deleteConfigurations();
             }
             foreach ($service->applications()->get() as $application) {
                 $application->forceDelete();

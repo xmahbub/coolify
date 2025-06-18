@@ -16,12 +16,10 @@ function collectProxyDockerNetworksByServer(Server $server)
         return collect();
     }
     $networks = instant_remote_process(['docker inspect --format="{{json .NetworkSettings.Networks }}" coolify-proxy'], $server, false);
-    $networks = collect($networks)->map(function ($network) {
+
+    return collect($networks)->map(function ($network) {
         return collect(json_decode($network))->keys();
     })->flatten()->unique();
-
-    return $networks;
-
 }
 function collectDockerNetworksByServer(Server $server)
 {
@@ -93,21 +91,17 @@ function connectProxyToNetworks(Server $server)
     if ($server->isSwarm()) {
         $commands = $networks->map(function ($network) {
             return [
-                "echo 'Connecting coolify-proxy to $network network...'",
                 "docker network ls --format '{{.Name}}' | grep '^$network$' >/dev/null || docker network create --driver overlay --attachable $network >/dev/null",
                 "docker network connect $network coolify-proxy >/dev/null 2>&1 || true",
                 "echo 'Successfully connected coolify-proxy to $network network.'",
-                "echo 'Proxy started and configured successfully!'",
             ];
         });
     } else {
         $commands = $networks->map(function ($network) {
             return [
-                "echo 'Connecting coolify-proxy to $network network...'",
                 "docker network ls --format '{{.Name}}' | grep '^$network$' >/dev/null || docker network create --attachable $network >/dev/null",
                 "docker network connect $network coolify-proxy >/dev/null 2>&1 || true",
                 "echo 'Successfully connected coolify-proxy to $network network.'",
-                "echo 'Proxy started and configured successfully!'",
             ];
         });
     }
@@ -151,6 +145,7 @@ function generate_default_proxy_configuration(Server $server)
             'coolify.proxy=true',
         ];
         $config = [
+            'name' => 'coolify-proxy',
             'networks' => $array_of_networks->toArray(),
             'services' => [
                 'traefik' => [
@@ -175,42 +170,46 @@ function generate_default_proxy_configuration(Server $server)
                     ],
                     'volumes' => [
                         '/var/run/docker.sock:/var/run/docker.sock:ro',
-                        "{$proxy_path}:/traefik",
+
                     ],
                     'command' => [
                         '--ping=true',
                         '--ping.entrypoint=http',
                         '--api.dashboard=true',
-                        '--api.insecure=false',
                         '--entrypoints.http.address=:80',
                         '--entrypoints.https.address=:443',
                         '--entrypoints.http.http.encodequerysemicolons=true',
-                        '--entryPoints.http.http2.maxConcurrentStreams=50',
+                        '--entryPoints.http.http2.maxConcurrentStreams=250',
                         '--entrypoints.https.http.encodequerysemicolons=true',
-                        '--entryPoints.https.http2.maxConcurrentStreams=50',
+                        '--entryPoints.https.http2.maxConcurrentStreams=250',
                         '--entrypoints.https.http3',
-                        '--providers.docker.exposedbydefault=false',
                         '--providers.file.directory=/traefik/dynamic/',
                         '--providers.file.watch=true',
                         '--certificatesresolvers.letsencrypt.acme.httpchallenge=true',
-                        '--certificatesresolvers.letsencrypt.acme.storage=/traefik/acme.json',
                         '--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http',
+                        '--certificatesresolvers.letsencrypt.acme.storage=/traefik/acme.json',
                     ],
                     'labels' => $labels,
                 ],
             ],
         ];
         if (isDev()) {
-            // $config['services']['traefik']['command'][] = "--log.level=debug";
+            $config['services']['traefik']['command'][] = '--api.insecure=true';
+            $config['services']['traefik']['command'][] = '--log.level=debug';
             $config['services']['traefik']['command'][] = '--accesslog.filepath=/traefik/access.log';
             $config['services']['traefik']['command'][] = '--accesslog.bufferingsize=100';
+            $config['services']['traefik']['volumes'][] = '/var/lib/docker/volumes/coolify_dev_coolify_data/_data/proxy/:/traefik';
+        } else {
+            $config['services']['traefik']['command'][] = '--api.insecure=false';
+            $config['services']['traefik']['volumes'][] = "{$proxy_path}:/traefik";
         }
         if ($server->isSwarm()) {
             data_forget($config, 'services.traefik.container_name');
             data_forget($config, 'services.traefik.restart');
             data_forget($config, 'services.traefik.labels');
 
-            $config['services']['traefik']['command'][] = '--providers.docker.swarmMode=true';
+            $config['services']['traefik']['command'][] = '--providers.swarm.endpoint=unix:///var/run/docker.sock';
+            $config['services']['traefik']['command'][] = '--providers.swarm.exposedbydefault=false';
             $config['services']['traefik']['deploy'] = [
                 'labels' => $labels,
                 'placement' => [
@@ -221,6 +220,7 @@ function generate_default_proxy_configuration(Server $server)
             ];
         } else {
             $config['services']['traefik']['command'][] = '--providers.docker=true';
+            $config['services']['traefik']['command'][] = '--providers.docker.exposedbydefault=false';
         }
     } elseif ($proxy_type === 'CADDY') {
         $config = [

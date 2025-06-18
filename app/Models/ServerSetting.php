@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
 use OpenApi\Attributes as OA;
 
 #[OA\Schema(
@@ -27,6 +28,7 @@ use OpenApi\Attributes as OA;
         'is_sentinel_enabled' => ['type' => 'boolean'],
         'is_swarm_manager' => ['type' => 'boolean'],
         'is_swarm_worker' => ['type' => 'boolean'],
+        'is_terminal_enabled' => ['type' => 'boolean'],
         'is_usable' => ['type' => 'boolean'],
         'logdrain_axiom_api_key' => ['type' => 'string'],
         'logdrain_axiom_dataset_name' => ['type' => 'string'],
@@ -44,6 +46,8 @@ use OpenApi\Attributes as OA;
         'wildcard_domain' => ['type' => 'string'],
         'created_at' => ['type' => 'string'],
         'updated_at' => ['type' => 'string'],
+        'delete_unused_volumes' => ['type' => 'boolean', 'description' => 'The flag to indicate if the unused volumes should be deleted.'],
+        'delete_unused_networks' => ['type' => 'boolean', 'description' => 'The flag to indicate if the unused networks should be deleted.'],
     ]
 )]
 class ServerSetting extends Model
@@ -54,6 +58,9 @@ class ServerSetting extends Model
         'force_docker_cleanup' => 'boolean',
         'docker_cleanup_threshold' => 'integer',
         'sentinel_token' => 'encrypted',
+        'is_reachable' => 'boolean',
+        'is_usable' => 'boolean',
+        'is_terminal_enabled' => 'boolean',
     ];
 
     protected static function booted()
@@ -61,23 +68,29 @@ class ServerSetting extends Model
         static::creating(function ($setting) {
             try {
                 if (str($setting->sentinel_token)->isEmpty()) {
-                    $setting->generateSentinelToken(save: false);
+                    $setting->generateSentinelToken(save: false, ignoreEvent: true);
                 }
                 if (str($setting->sentinel_custom_url)->isEmpty()) {
-                    $url = $setting->generateSentinelUrl(save: false);
-                    if (str($url)->isEmpty()) {
-                        $setting->is_sentinel_enabled = false;
-                    } else {
-                        $setting->is_sentinel_enabled = true;
-                    }
+                    $setting->generateSentinelUrl(save: false, ignoreEvent: true);
                 }
             } catch (\Throwable $e) {
-                loggy('Error creating server setting: '.$e->getMessage());
+                Log::error('Error creating server setting: '.$e->getMessage());
+            }
+        });
+        static::updated(function ($settings) {
+            if (
+                $settings->isDirty('sentinel_token') ||
+                $settings->isDirty('sentinel_custom_url') ||
+                $settings->isDirty('sentinel_metrics_refresh_rate_seconds') ||
+                $settings->isDirty('sentinel_metrics_history_days') ||
+                $settings->isDirty('sentinel_push_interval_seconds')
+            ) {
+                $settings->server->restartSentinel();
             }
         });
     }
 
-    public function generateSentinelToken(bool $save = true)
+    public function generateSentinelToken(bool $save = true, bool $ignoreEvent = false)
     {
         $data = [
             'server_uuid' => $this->server->uuid,
@@ -86,13 +99,17 @@ class ServerSetting extends Model
         $encrypted = encrypt($token);
         $this->sentinel_token = $encrypted;
         if ($save) {
-            $this->save();
+            if ($ignoreEvent) {
+                $this->saveQuietly();
+            } else {
+                $this->save();
+            }
         }
 
-        return $encrypted;
+        return $token;
     }
 
-    public function generateSentinelUrl(bool $save = true)
+    public function generateSentinelUrl(bool $save = true, bool $ignoreEvent = false)
     {
         $domain = null;
         $settings = InstanceSettings::get();
@@ -100,14 +117,18 @@ class ServerSetting extends Model
             $domain = 'http://host.docker.internal:8000';
         } elseif ($settings->fqdn) {
             $domain = $settings->fqdn;
-        } elseif ($settings->ipv4) {
-            $domain = $settings->ipv4.':8000';
-        } elseif ($settings->ipv6) {
-            $domain = $settings->ipv6.':8000';
+        } elseif ($settings->public_ipv4) {
+            $domain = 'http://'.$settings->public_ipv4.':8000';
+        } elseif ($settings->public_ipv6) {
+            $domain = 'http://'.$settings->public_ipv6.':8000';
         }
         $this->sentinel_custom_url = $domain;
         if ($save) {
-            $this->save();
+            if ($ignoreEvent) {
+                $this->saveQuietly();
+            } else {
+                $this->save();
+            }
         }
 
         return $domain;

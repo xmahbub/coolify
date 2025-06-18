@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
-use Illuminate\Database\Eloquent\Model;
 use OpenApi\Attributes as OA;
 
 #[OA\Schema(
@@ -18,7 +17,7 @@ use OpenApi\Attributes as OA;
         'description' => ['type' => 'string'],
     ]
 )]
-class Environment extends Model
+class Environment extends BaseModel
 {
     protected $guarded = [];
 
@@ -27,10 +26,8 @@ class Environment extends Model
         static::deleting(function ($environment) {
             $shared_variables = $environment->environment_variables();
             foreach ($shared_variables as $shared_variable) {
-                ray('Deleting environment shared variable: '.$shared_variable->name);
                 $shared_variable->delete();
             }
-
         });
     }
 

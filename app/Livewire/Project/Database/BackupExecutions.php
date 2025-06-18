@@ -2,10 +2,10 @@
 
 namespace App\Livewire\Project\Database;
 
+use App\Models\InstanceSettings;
 use App\Models\ScheduledDatabaseBackup;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
-use Livewire\Attributes\On;
 use Livewire\Component;
 
 class BackupExecutions extends Component
@@ -18,9 +18,9 @@ class BackupExecutions extends Component
 
     public $setDeletableBackup;
 
-    public $delete_backup_s3 = true;
+    public $delete_backup_s3 = false;
 
-    public $delete_backup_sftp = true;
+    public $delete_backup_sftp = false;
 
     public function getListeners()
     {
@@ -28,7 +28,6 @@ class BackupExecutions extends Component
 
         return [
             "echo-private:team.{$userId},BackupCreated" => 'refreshBackupExecutions',
-            'deleteBackup',
         ];
     }
 
@@ -41,13 +40,14 @@ class BackupExecutions extends Component
         }
     }
 
-    #[On('deleteBackup')]
     public function deleteBackup($executionId, $password)
     {
-        if (! Hash::check($password, Auth::user()->password)) {
-            $this->addError('password', 'The provided password is incorrect.');
+        if (! data_get(InstanceSettings::get(), 'disable_two_step_confirmation')) {
+            if (! Hash::check($password, Auth::user()->password)) {
+                $this->addError('password', 'The provided password is incorrect.');
 
-            return;
+                return;
+            }
         }
 
         $execution = $this->backup->executions()->where('id', $executionId)->first();
@@ -57,23 +57,25 @@ class BackupExecutions extends Component
             return;
         }
 
-        if ($execution->scheduledDatabaseBackup->database->getMorphClass() === 'App\Models\ServiceDatabase') {
-            delete_backup_locally($execution->filename, $execution->scheduledDatabaseBackup->database->service->destination->server);
-        } else {
-            delete_backup_locally($execution->filename, $execution->scheduledDatabaseBackup->database->destination->server);
-        }
+        $server = $execution->scheduledDatabaseBackup->database->getMorphClass() === \App\Models\ServiceDatabase::class
+            ? $execution->scheduledDatabaseBackup->database->service->destination->server
+            : $execution->scheduledDatabaseBackup->database->destination->server;
 
-        if ($this->delete_backup_s3) {
-            // Add logic to delete from S3
-        }
+        try {
+            if ($execution->filename) {
+                deleteBackupsLocally($execution->filename, $server);
 
-        if ($this->delete_backup_sftp) {
-            // Add logic to delete from SFTP
-        }
+                if ($this->delete_backup_s3 && $execution->scheduledDatabaseBackup->s3) {
+                    deleteBackupsS3($execution->filename, $execution->scheduledDatabaseBackup->s3);
+                }
+            }
 
-        $execution->delete();
-        $this->dispatch('success', 'Backup deleted.');
-        $this->refreshBackupExecutions();
+            $execution->delete();
+            $this->dispatch('success', 'Backup deleted.');
+            $this->refreshBackupExecutions();
+        } catch (\Exception $e) {
+            $this->dispatch('error', 'Failed to delete backup: '.$e->getMessage());
+        }
     }
 
     public function download_file($exeuctionId)
@@ -83,8 +85,10 @@ class BackupExecutions extends Component
 
     public function refreshBackupExecutions(): void
     {
-        if ($this->backup) {
-            $this->executions = $this->backup->executions()->get();
+        if ($this->backup && $this->backup->exists) {
+            $this->executions = $this->backup->executions()->get()->toArray();
+        } else {
+            $this->executions = [];
         }
     }
 
@@ -113,36 +117,12 @@ class BackupExecutions extends Component
         return null;
     }
 
-    public function getServerTimezone()
-    {
-        $server = $this->server();
-        if (! $server) {
-            return 'UTC';
-        }
-        $serverTimezone = $server->settings->server_timezone;
-
-        return $serverTimezone;
-    }
-
-    public function formatDateInServerTimezone($date)
-    {
-        $serverTimezone = $this->getServerTimezone();
-        $dateObj = new \DateTime($date);
-        try {
-            $dateObj->setTimezone(new \DateTimeZone($serverTimezone));
-        } catch (\Exception $e) {
-            $dateObj->setTimezone(new \DateTimeZone('UTC'));
-        }
-
-        return $dateObj->format('Y-m-d H:i:s T');
-    }
-
     public function render()
     {
         return view('livewire.project.database.backup-executions', [
             'checkboxes' => [
                 ['id' => 'delete_backup_s3', 'label' => 'Delete the selected backup permanently form S3 Storage'],
-                ['id' => 'delete_backup_sftp', 'label' => 'Delete the selected backup permanently form SFTP Storage'],
+                // ['id' => 'delete_backup_sftp', 'label' => 'Delete the selected backup permanently form SFTP Storage'],
             ],
         ]);
     }

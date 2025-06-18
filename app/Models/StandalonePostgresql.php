@@ -3,9 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class StandalonePostgresql extends BaseModel
@@ -39,6 +37,11 @@ class StandalonePostgresql extends BaseModel
             $database->environment_variables()->delete();
             $database->tags()->detach();
         });
+        static::saving(function ($database) {
+            if ($database->isDirty('status')) {
+                $database->forceFill(['last_online_at' => now()]);
+            }
+        });
     }
 
     public function workdir()
@@ -55,7 +58,7 @@ class StandalonePostgresql extends BaseModel
         );
     }
 
-    public function delete_configurations()
+    public function deleteConfigurations()
     {
         $server = data_get($this, 'destination.server');
         $workdir = $this->workdir();
@@ -64,14 +67,14 @@ class StandalonePostgresql extends BaseModel
         }
     }
 
-    public function delete_volumes(Collection $persistentStorages)
+    public function deleteVolumes()
     {
+        $persistentStorages = $this->persistentStorages()->get() ?? collect();
         if ($persistentStorages->count() === 0) {
             return;
         }
         $server = data_get($this, 'destination.server');
         foreach ($persistentStorages as $storage) {
-            ray('Deleting volume: '.$storage->name);
             instant_remote_process(["docker volume rm -f $storage->name"], $server, false);
         }
     }
@@ -166,7 +169,7 @@ class StandalonePostgresql extends BaseModel
         if (data_get($this, 'environment.project.uuid')) {
             return route('project.database.configuration', [
                 'project_uuid' => data_get($this, 'environment.project.uuid'),
-                'environment_name' => data_get($this, 'environment.name'),
+                'environment_uuid' => data_get($this, 'environment.uuid'),
                 'database_uuid' => data_get($this, 'uuid'),
             ]);
         }
@@ -216,7 +219,19 @@ class StandalonePostgresql extends BaseModel
     protected function internalDbUrl(): Attribute
     {
         return new Attribute(
-            get: fn () => "postgres://{$this->postgres_user}:{$this->postgres_password}@{$this->uuid}:5432/{$this->postgres_db}",
+            get: function () {
+                $encodedUser = rawurlencode($this->postgres_user);
+                $encodedPass = rawurlencode($this->postgres_password);
+                $url = "postgres://{$encodedUser}:{$encodedPass}@{$this->uuid}:5432/{$this->postgres_db}";
+                if ($this->enable_ssl) {
+                    $url .= "?sslmode={$this->ssl_mode}";
+                    if (in_array($this->ssl_mode, ['verify-ca', 'verify-full'])) {
+                        $url .= '&sslrootcert=/etc/ssl/certs/coolify-ca.crt';
+                    }
+                }
+
+                return $url;
+            },
         );
     }
 
@@ -225,7 +240,17 @@ class StandalonePostgresql extends BaseModel
         return new Attribute(
             get: function () {
                 if ($this->is_public && $this->public_port) {
-                    return "postgres://{$this->postgres_user}:{$this->postgres_password}@{$this->destination->server->getIp}:{$this->public_port}/{$this->postgres_db}";
+                    $encodedUser = rawurlencode($this->postgres_user);
+                    $encodedPass = rawurlencode($this->postgres_password);
+                    $url = "postgres://{$encodedUser}:{$encodedPass}@{$this->destination->server->getIp}:{$this->public_port}/{$this->postgres_db}";
+                    if ($this->enable_ssl) {
+                        $url .= "?sslmode={$this->ssl_mode}";
+                        if (in_array($this->ssl_mode, ['verify-ca', 'verify-full'])) {
+                            $url .= '&sslrootcert=/etc/ssl/certs/coolify-ca.crt';
+                        }
+                    }
+
+                    return $url;
                 }
 
                 return null;
@@ -238,9 +263,19 @@ class StandalonePostgresql extends BaseModel
         return $this->belongsTo(Environment::class);
     }
 
+    public function persistentStorages()
+    {
+        return $this->morphMany(LocalPersistentVolume::class, 'resource');
+    }
+
     public function fileStorages()
     {
         return $this->morphMany(LocalFileVolume::class, 'resource');
+    }
+
+    public function sslCertificates()
+    {
+        return $this->morphMany(SslCertificate::class, 'resource');
     }
 
     public function destination()
@@ -248,24 +283,20 @@ class StandalonePostgresql extends BaseModel
         return $this->morphTo();
     }
 
-    public function environment_variables(): HasMany
+    public function runtime_environment_variables()
     {
-        return $this->hasMany(EnvironmentVariable::class);
-    }
-
-    public function runtime_environment_variables(): HasMany
-    {
-        return $this->hasMany(EnvironmentVariable::class);
-    }
-
-    public function persistentStorages()
-    {
-        return $this->morphMany(LocalPersistentVolume::class, 'resource');
+        return $this->morphMany(EnvironmentVariable::class, 'resourceable');
     }
 
     public function scheduledBackups()
     {
         return $this->morphMany(ScheduledDatabaseBackup::class, 'database');
+    }
+
+    public function environment_variables()
+    {
+        return $this->morphMany(EnvironmentVariable::class, 'resourceable')
+            ->orderBy('key', 'asc');
     }
 
     public function isBackupSolutionAvailable()
@@ -282,7 +313,7 @@ class StandalonePostgresql extends BaseModel
         if (str($metrics)->contains('error')) {
             $error = json_decode($metrics, true);
             $error = data_get($error, 'error', 'Something is not okay, are you okay?');
-            if ($error == 'Unauthorized') {
+            if ($error === 'Unauthorized') {
                 $error = 'Unauthorized, please check your metrics token or restart Sentinel to set a new token.';
             }
             throw new \Exception($error);
@@ -304,7 +335,7 @@ class StandalonePostgresql extends BaseModel
         if (str($metrics)->contains('error')) {
             $error = json_decode($metrics, true);
             $error = data_get($error, 'error', 'Something is not okay, are you okay?');
-            if ($error == 'Unauthorized') {
+            if ($error === 'Unauthorized') {
                 $error = 'Unauthorized, please check your metrics token or restart Sentinel to set a new token.';
             }
             throw new \Exception($error);

@@ -65,22 +65,72 @@
                     type="password" readonly wire:model="db_url_public" />
             @endif
         </div>
+
+        <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between py-2">
+                <div class="flex items-center justify-between w-full">
+                    <h3>SSL Configuration</h3>
+                    @if ($database->enable_ssl && $certificateValidUntil)
+                        <x-modal-confirmation title="Regenerate SSL Certificates"
+                            buttonTitle="Regenerate SSL Certificates" :actions="[
+                                'The SSL certificate of this database will be regenerated.',
+                                'You must restart the database after regenerating the certificate to start using the new certificate.',
+                            ]"
+                            submitAction="regenerateSslCertificate" :confirmWithText="false" :confirmWithPassword="false" />
+                    @endif
+                </div>
+            </div>
+            @if ($database->enable_ssl && $certificateValidUntil)
+                <span class="text-sm">Valid until:
+                    @if (now()->gt($certificateValidUntil))
+                        <span class="text-red-500">{{ $certificateValidUntil->format('d.m.Y H:i:s') }} - Expired</span>
+                    @elseif(now()->addDays(30)->gt($certificateValidUntil))
+                        <span class="text-red-500">{{ $certificateValidUntil->format('d.m.Y H:i:s') }} - Expiring
+                            soon</span>
+                    @else
+                        <span>{{ $certificateValidUntil->format('d.m.Y H:i:s') }}</span>
+                    @endif
+                </span>
+            @endif
+        </div>
+        <div class="flex flex-col gap-2">
+            <div class="flex flex-col gap-2">
+                <div class="w-64">
+                    @if (str($database->status)->contains('exited'))
+                        <x-forms.checkbox id="database.enable_ssl" label="Enable SSL"
+                            wire:model.live="database.enable_ssl" instantSave="instantSaveSSL" />
+                    @else
+                        <x-forms.checkbox id="database.enable_ssl" label="Enable SSL"
+                            wire:model.live="database.enable_ssl" instantSave="instantSaveSSL" disabled
+                            helper="Database should be stopped to change this settings." />
+                    @endif
+                </div>
+            </div>
+        </div>
+
         <div>
-            <h3 class="py-2">Proxy</h3>
-            <div class="flex items-end gap-2">
-                <x-forms.input placeholder="5432" disabled="{{ data_get($database, 'is_public') }}"
-                    id="database.public_port" label="Public Port" />
-                <x-slide-over fullScreen>
-                    <x-slot:title>Proxy Logs</x-slot:title>
-                    <x-slot:content>
-                        <livewire:project.shared.get-logs :server="$server" :resource="$database"
-                            container="{{ data_get($database, 'uuid') }}-proxy" lazy />
-                    </x-slot:content>
-                    <x-forms.button disabled="{{ !data_get($database, 'is_public') }}" @click="slideOverOpen=true"
-                        class="w-28">Proxy Logs</x-forms.button>
-                </x-slide-over>
+            <div class="flex flex-col py-2 w-64">
+                <div class="flex items-center gap-2 pb-2">
+                    <div class="flex items-center">
+                        <h3>Proxy</h3>
+                        <x-loading wire:loading wire:target="instantSave" />
+                    </div>
+                    @if (data_get($database, 'is_public'))
+                        <x-slide-over fullScreen>
+                            <x-slot:title>Proxy Logs</x-slot:title>
+                            <x-slot:content>
+                                <livewire:project.shared.get-logs :server="$server" :resource="$database"
+                                    container="{{ data_get($database, 'uuid') }}-proxy" lazy />
+                            </x-slot:content>
+                            <x-forms.button disabled="{{ !data_get($database, 'is_public') }}"
+                                @click="slideOverOpen=true">Logs</x-forms.button>
+                        </x-slide-over>
+                    @endif
+                </div>
                 <x-forms.checkbox instantSave id="database.is_public" label="Make it publicly available" />
             </div>
+            <x-forms.input placeholder="5432" disabled="{{ data_get($database, 'is_public') }}"
+                id="database.public_port" label="Public Port" />
         </div>
         <x-forms.textarea label="Custom MariaDB Configuration" rows="10" id="database.mariadb_conf" />
         <h3 class="pt-4">Advanced</h3>

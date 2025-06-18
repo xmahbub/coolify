@@ -11,16 +11,20 @@
         toast(this.title, { description: this.description, type: this.type, position: this.position, html: html })
     }
 }" x-init="window.toast = function(message, options = {}) {
-    let description = '';
-    let type = 'default';
-    let position = 'top-center';
-    let html = '';
-    if (typeof options.description != 'undefined') description = options.description;
-    if (typeof options.type != 'undefined') type = options.type;
-    if (typeof options.position != 'undefined') position = options.position;
-    if (typeof options.html != 'undefined') html = options.html;
+    try {
+        let description = '';
+        let type = 'default';
+        let position = 'top-center';
+        let html = '';
+        if (typeof options.description != 'undefined') description = options.description;
+        if (typeof options.type != 'undefined') type = options.type;
+        if (typeof options.position != 'undefined') position = options.position;
+        if (typeof options.html != 'undefined') html = options.html;
 
-    window.dispatchEvent(new CustomEvent('toast-show', { detail: { type: type, message: message, description: description, position: position, html: html } }));
+        window.dispatchEvent(new CustomEvent('toast-show', { detail: { type: type, message: message, description: description, position: position, html: html } }));
+    } catch (error) {
+        console.error('Error showing toast:', error);
+    }
 }" class="relative space-y-5">
     <template x-teleport="body">
         <ul x-data="{
@@ -311,7 +315,7 @@
                     }
                 }
             });"
-            class="fixed block w-full group z-[9999] sm:max-w-xs"
+            class="fixed block w-full group z-9999 sm:max-w-xs"
             :class="{ 'right-0 top-0 sm:mt-6 sm:mr-6': position=='top-right', 'left-0 top-0 sm:mt-6 sm:ml-6': position=='top-left', 'left-1/2 -translate-x-1/2 top-0 sm:mt-6': position=='top-center', 'right-0 bottom-0 sm:mr-6 sm:mb-6': position=='bottom-right', 'left-0 bottom-0 sm:ml-6 sm:mb-6': position=='bottom-left', 'left-1/2 -translate-x-1/2 bottom-0 sm:mb-6': position=='bottom-center' }"
             x-cloak>
 
@@ -386,7 +390,7 @@
                     class="absolute w-full duration-100 ease-out sm:max-w-xs "
                     :class="{ 'toast-no-description': !toast.description }">
                     <span
-                        class="relative flex flex-col items-start shadow-[0_5px_15px_-3px_rgb(0_0_0_/_0.08)] w-full transition-all duration-100 ease-out dark:bg-coolgray-100 bg-white dark:border dark:border-coolgray-200 rounded sm:max-w-xs group"
+                        class="relative flex flex-col items-start shadow-[0_5px_15px_-3px_rgb(0_0_0_/_0.08)] w-full transition-all duration-100 ease-out dark:bg-coolgray-100 bg-white dark:border dark:border-coolgray-200 rounded-sm sm:max-w-xs group"
                         :class="{ 'p-4': !toast.html, 'p-0': toast.html }">
                         <template x-if="!toast.html">
                             <div class="relative w-full">

@@ -3,9 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class StandaloneClickhouse extends BaseModel
@@ -37,6 +35,11 @@ class StandaloneClickhouse extends BaseModel
             $database->scheduledBackups()->delete();
             $database->environment_variables()->delete();
             $database->tags()->detach();
+        });
+        static::saving(function ($database) {
+            if ($database->isDirty('status')) {
+                $database->forceFill(['last_online_at' => now()]);
+            }
         });
     }
 
@@ -90,7 +93,7 @@ class StandaloneClickhouse extends BaseModel
         return database_configuration_dir()."/{$this->uuid}";
     }
 
-    public function delete_configurations()
+    public function deleteConfigurations()
     {
         $server = data_get($this, 'destination.server');
         $workdir = $this->workdir();
@@ -99,8 +102,9 @@ class StandaloneClickhouse extends BaseModel
         }
     }
 
-    public function delete_volumes(Collection $persistentStorages)
+    public function deleteVolumes()
     {
+        $persistentStorages = $this->persistentStorages()->get() ?? collect();
         if ($persistentStorages->count() === 0) {
             return;
         }
@@ -159,12 +163,17 @@ class StandaloneClickhouse extends BaseModel
         return data_get($this, 'environment.project');
     }
 
+    public function sslCertificates()
+    {
+        return $this->morphMany(SslCertificate::class, 'resource');
+    }
+
     public function link()
     {
         if (data_get($this, 'environment.project.uuid')) {
             return route('project.database.configuration', [
                 'project_uuid' => data_get($this, 'environment.project.uuid'),
-                'environment_name' => data_get($this, 'environment.name'),
+                'environment_uuid' => data_get($this, 'environment.uuid'),
                 'database_uuid' => data_get($this, 'uuid'),
             ]);
         }
@@ -214,7 +223,12 @@ class StandaloneClickhouse extends BaseModel
     protected function internalDbUrl(): Attribute
     {
         return new Attribute(
-            get: fn () => "clickhouse://{$this->clickhouse_admin_user}:{$this->clickhouse_admin_password}@{$this->uuid}:9000/{$this->clickhouse_db}",
+            get: function () {
+                $encodedUser = rawurlencode($this->clickhouse_admin_user);
+                $encodedPass = rawurlencode($this->clickhouse_admin_password);
+
+                return "clickhouse://{$encodedUser}:{$encodedPass}@{$this->uuid}:9000/{$this->clickhouse_db}";
+            },
         );
     }
 
@@ -223,7 +237,10 @@ class StandaloneClickhouse extends BaseModel
         return new Attribute(
             get: function () {
                 if ($this->is_public && $this->public_port) {
-                    return "clickhouse://{$this->clickhouse_admin_user}:{$this->clickhouse_admin_password}@{$this->destination->server->getIp}:{$this->public_port}/{$this->clickhouse_db}";
+                    $encodedUser = rawurlencode($this->clickhouse_admin_user);
+                    $encodedPass = rawurlencode($this->clickhouse_admin_password);
+
+                    return "clickhouse://{$encodedUser}:{$encodedPass}@{$this->destination->server->getIp}:{$this->public_port}/{$this->clickhouse_db}";
                 }
 
                 return null;
@@ -246,14 +263,15 @@ class StandaloneClickhouse extends BaseModel
         return $this->morphTo();
     }
 
-    public function environment_variables(): HasMany
+    public function environment_variables()
     {
-        return $this->hasMany(EnvironmentVariable::class);
+        return $this->morphMany(EnvironmentVariable::class, 'resourceable')
+            ->orderBy('key', 'asc');
     }
 
-    public function runtime_environment_variables(): HasMany
+    public function runtime_environment_variables()
     {
-        return $this->hasMany(EnvironmentVariable::class);
+        return $this->morphMany(EnvironmentVariable::class, 'resourceable');
     }
 
     public function persistentStorages()
@@ -275,7 +293,7 @@ class StandaloneClickhouse extends BaseModel
         if (str($metrics)->contains('error')) {
             $error = json_decode($metrics, true);
             $error = data_get($error, 'error', 'Something is not okay, are you okay?');
-            if ($error == 'Unauthorized') {
+            if ($error === 'Unauthorized') {
                 $error = 'Unauthorized, please check your metrics token or restart Sentinel to set a new token.';
             }
             throw new \Exception($error);
@@ -297,7 +315,7 @@ class StandaloneClickhouse extends BaseModel
         if (str($metrics)->contains('error')) {
             $error = json_decode($metrics, true);
             $error = data_get($error, 'error', 'Something is not okay, are you okay?');
-            if ($error == 'Unauthorized') {
+            if ($error === 'Unauthorized') {
                 $error = 'Unauthorized, please check your metrics token or restart Sentinel to set a new token.';
             }
             throw new \Exception($error);

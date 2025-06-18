@@ -90,10 +90,12 @@ class ProjectController extends Controller
         if (is_null($teamId)) {
             return invalidTokenResponse();
         }
-        $project = Project::whereTeamId($teamId)->whereUuid(request()->uuid)->first()->load(['environments']);
+        $project = Project::whereTeamId($teamId)->whereUuid(request()->uuid)->first();
         if (! $project) {
             return response()->json(['message' => 'Project not found.'], 404);
         }
+
+        $project->load(['environments']);
 
         return response()->json(
             serializeApiResponse($project),
@@ -102,21 +104,21 @@ class ProjectController extends Controller
 
     #[OA\Get(
         summary: 'Environment',
-        description: 'Get environment by name.',
-        path: '/projects/{uuid}/{environment_name}',
-        operationId: 'get-environment-by-name',
+        description: 'Get environment by name or UUID.',
+        path: '/projects/{uuid}/{environment_name_or_uuid}',
+        operationId: 'get-environment-by-name-or-uuid',
         security: [
             ['bearerAuth' => []],
         ],
         tags: ['Projects'],
         parameters: [
             new OA\Parameter(name: 'uuid', in: 'path', required: true, description: 'Project UUID', schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'environment_name', in: 'path', required: true, description: 'Environment name', schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'environment_name_or_uuid', in: 'path', required: true, description: 'Environment name or UUID', schema: new OA\Schema(type: 'string')),
         ],
         responses: [
             new OA\Response(
                 response: 200,
-                description: 'Project details',
+                description: 'Environment details',
                 content: new OA\JsonContent(ref: '#/components/schemas/Environment')),
             new OA\Response(
                 response: 401,
@@ -141,14 +143,17 @@ class ProjectController extends Controller
         if (! $request->uuid) {
             return response()->json(['message' => 'UUID is required.'], 422);
         }
-        if (! $request->environment_name) {
-            return response()->json(['message' => 'Environment name is required.'], 422);
+        if (! $request->environment_name_or_uuid) {
+            return response()->json(['message' => 'Environment name or UUID is required.'], 422);
         }
         $project = Project::whereTeamId($teamId)->whereUuid($request->uuid)->first();
         if (! $project) {
             return response()->json(['message' => 'Project not found.'], 404);
         }
-        $environment = $project->environments()->whereName($request->environment_name)->first();
+        $environment = $project->environments()->whereName($request->environment_name_or_uuid)->first();
+        if (! $environment) {
+            $environment = $project->environments()->whereUuid($request->environment_name_or_uuid)->first();
+        }
         if (! $environment) {
             return response()->json(['message' => 'Environment not found.'], 404);
         }
@@ -262,6 +267,18 @@ class ProjectController extends Controller
             ['bearerAuth' => []],
         ],
         tags: ['Projects'],
+        parameters: [
+            new OA\Parameter(
+                name: 'uuid',
+                in: 'path',
+                description: 'UUID of the project.',
+                required: true,
+                schema: new OA\Schema(
+                    type: 'string',
+                    format: 'uuid',
+                )
+            ),
+        ],
         requestBody: new OA\RequestBody(
             required: true,
             description: 'Project updated.',
@@ -356,7 +373,6 @@ class ProjectController extends Controller
             'name' => $project->name,
             'description' => $project->description,
         ])->setStatusCode(201);
-
     }
 
     #[OA\Delete(
@@ -423,7 +439,7 @@ class ProjectController extends Controller
         if (! $project) {
             return response()->json(['message' => 'Project not found.'], 404);
         }
-        if ($project->resource_count() > 0) {
+        if (! $project->isEmpty()) {
             return response()->json(['message' => 'Project has resources, so it cannot be deleted.'], 400);
         }
 

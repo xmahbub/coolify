@@ -6,14 +6,14 @@
 
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:25.0.2
+    image: quay.io/keycloak/keycloak:26.1
     command:
       - start
     environment:
       - SERVICE_FQDN_KEYCLOAK_8080
       - TZ=${TIMEZONE:-UTC}
-      - KEYCLOAK_ADMIN=${SERVICE_USER_ADMIN}
-      - KEYCLOAK_ADMIN_PASSWORD=${SERVICE_PASSWORD_ADMIN}
+      - KC_BOOTSTRAP_ADMIN_USERNAME=${SERVICE_USER_ADMIN}
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${SERVICE_PASSWORD_ADMIN}
       - KC_HOSTNAME=${SERVICE_FQDN_KEYCLOAK}
       - KC_HTTP_ENABLED=${KC_HTTP_ENABLED:-true}
       - KC_HEALTH_ENABLED=${KC_HEALTH_ENABLED:-true}
@@ -24,7 +24,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "exec 3<>/dev/tcp/127.0.0.1/9000;echo -e 'GET /health/ready HTTP/1.1\r\nhost: http://localhost\r\nConnection: close\r\n\r\n' >&3;if [ $? -eq 0 ]; then echo 'Healthcheck Successful';exit 0;else echo 'Healthcheck Failed';exit 1;fi;",
+          "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost:9000\r\nConnection: close\r\n\r\n' >&3;cat <&3 | grep -q '\"status\": \"UP\"' && exit 0 || exit 1",
         ]
       interval: 5s
       timeout: 20s

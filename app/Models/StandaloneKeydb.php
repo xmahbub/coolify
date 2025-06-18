@@ -3,9 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class StandaloneKeydb extends BaseModel
@@ -37,6 +35,11 @@ class StandaloneKeydb extends BaseModel
             $database->scheduledBackups()->delete();
             $database->environment_variables()->delete();
             $database->tags()->detach();
+        });
+        static::saving(function ($database) {
+            if ($database->isDirty('status')) {
+                $database->forceFill(['last_online_at' => now()]);
+            }
         });
     }
 
@@ -90,7 +93,7 @@ class StandaloneKeydb extends BaseModel
         return database_configuration_dir()."/{$this->uuid}";
     }
 
-    public function delete_configurations()
+    public function deleteConfigurations()
     {
         $server = data_get($this, 'destination.server');
         $workdir = $this->workdir();
@@ -99,8 +102,9 @@ class StandaloneKeydb extends BaseModel
         }
     }
 
-    public function delete_volumes(Collection $persistentStorages)
+    public function deleteVolumes()
     {
+        $persistentStorages = $this->persistentStorages()->get() ?? collect();
         if ($persistentStorages->count() === 0) {
             return;
         }
@@ -164,12 +168,17 @@ class StandaloneKeydb extends BaseModel
         return data_get($this, 'environment.project.team');
     }
 
+    public function sslCertificates()
+    {
+        return $this->morphMany(SslCertificate::class, 'resource');
+    }
+
     public function link()
     {
         if (data_get($this, 'environment.project.uuid')) {
             return route('project.database.configuration', [
                 'project_uuid' => data_get($this, 'environment.project.uuid'),
-                'environment_name' => data_get($this, 'environment.name'),
+                'environment_uuid' => data_get($this, 'environment.uuid'),
                 'database_uuid' => data_get($this, 'uuid'),
             ]);
         }
@@ -214,7 +223,18 @@ class StandaloneKeydb extends BaseModel
     protected function internalDbUrl(): Attribute
     {
         return new Attribute(
-            get: fn () => "redis://:{$this->keydb_password}@{$this->uuid}:6379/0",
+            get: function () {
+                $scheme = $this->enable_ssl ? 'rediss' : 'redis';
+                $port = $this->enable_ssl ? 6380 : 6379;
+                $encodedPass = rawurlencode($this->keydb_password);
+                $url = "{$scheme}://:{$encodedPass}@{$this->uuid}:{$port}/0";
+
+                if ($this->enable_ssl && $this->ssl_mode === 'verify-ca') {
+                    $url .= '?cacert=/etc/ssl/certs/coolify-ca.crt';
+                }
+
+                return $url;
+            }
         );
     }
 
@@ -223,7 +243,15 @@ class StandaloneKeydb extends BaseModel
         return new Attribute(
             get: function () {
                 if ($this->is_public && $this->public_port) {
-                    return "redis://:{$this->keydb_password}@{$this->destination->server->getIp}:{$this->public_port}/0";
+                    $scheme = $this->enable_ssl ? 'rediss' : 'redis';
+                    $encodedPass = rawurlencode($this->keydb_password);
+                    $url = "{$scheme}://:{$encodedPass}@{$this->destination->server->getIp}:{$this->public_port}/0";
+
+                    if ($this->enable_ssl && $this->ssl_mode === 'verify-ca') {
+                        $url .= '?cacert=/etc/ssl/certs/coolify-ca.crt';
+                    }
+
+                    return $url;
                 }
 
                 return null;
@@ -246,14 +274,9 @@ class StandaloneKeydb extends BaseModel
         return $this->morphTo();
     }
 
-    public function environment_variables(): HasMany
+    public function runtime_environment_variables()
     {
-        return $this->hasMany(EnvironmentVariable::class);
-    }
-
-    public function runtime_environment_variables(): HasMany
-    {
-        return $this->hasMany(EnvironmentVariable::class);
+        return $this->morphMany(EnvironmentVariable::class, 'resourceable');
     }
 
     public function persistentStorages()
@@ -275,7 +298,7 @@ class StandaloneKeydb extends BaseModel
         if (str($metrics)->contains('error')) {
             $error = json_decode($metrics, true);
             $error = data_get($error, 'error', 'Something is not okay, are you okay?');
-            if ($error == 'Unauthorized') {
+            if ($error === 'Unauthorized') {
                 $error = 'Unauthorized, please check your metrics token or restart Sentinel to set a new token.';
             }
             throw new \Exception($error);
@@ -297,7 +320,7 @@ class StandaloneKeydb extends BaseModel
         if (str($metrics)->contains('error')) {
             $error = json_decode($metrics, true);
             $error = data_get($error, 'error', 'Something is not okay, are you okay?');
-            if ($error == 'Unauthorized') {
+            if ($error === 'Unauthorized') {
                 $error = 'Unauthorized, please check your metrics token or restart Sentinel to set a new token.';
             }
             throw new \Exception($error);
@@ -313,5 +336,11 @@ class StandaloneKeydb extends BaseModel
     public function isBackupSolutionAvailable()
     {
         return false;
+    }
+
+    public function environment_variables()
+    {
+        return $this->morphMany(EnvironmentVariable::class, 'resourceable')
+            ->orderBy('key', 'asc');
     }
 }

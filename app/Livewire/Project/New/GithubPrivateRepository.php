@@ -105,12 +105,16 @@ class GithubPrivateRepository extends Component
         $this->page = 1;
         $this->selected_github_app_id = $github_app_id;
         $this->github_app = GithubApp::where('id', $github_app_id)->first();
-        $this->token = generate_github_installation_token($this->github_app);
-        $this->loadRepositoryByPage();
+        $this->token = generateGithubInstallationToken($this->github_app);
+        $repositories = loadRepositoryByPage($this->github_app, $this->token, $this->page);
+        $this->total_repositories_count = $repositories['total_count'];
+        $this->repositories = $this->repositories->concat(collect($repositories['repositories']));
         if ($this->repositories->count() < $this->total_repositories_count) {
             while ($this->repositories->count() < $this->total_repositories_count) {
                 $this->page++;
-                $this->loadRepositoryByPage();
+                $repositories = loadRepositoryByPage($this->github_app, $this->token, $this->page);
+                $this->total_repositories_count = $repositories['total_count'];
+                $this->repositories = $this->repositories->concat(collect($repositories['repositories']));
             }
         }
         $this->repositories = $this->repositories->sortBy('name');
@@ -118,21 +122,6 @@ class GithubPrivateRepository extends Component
             $this->selected_repository_id = data_get($this->repositories->first(), 'id');
         }
         $this->current_step = 'repository';
-    }
-
-    protected function loadRepositoryByPage()
-    {
-        $response = Http::withToken($this->token)->get("{$this->github_app->api_url}/installation/repositories?per_page=100&page={$this->page}");
-        $json = $response->json();
-        if ($response->status() !== 200) {
-            return $this->dispatch('error', $json['message']);
-        }
-
-        if ($json['total_count'] === 0) {
-            return;
-        }
-        $this->total_repositories_count = $json['total_count'];
-        $this->repositories = $this->repositories->concat(collect($json['repositories']));
     }
 
     public function loadBranches()
@@ -153,7 +142,6 @@ class GithubPrivateRepository extends Component
 
     protected function loadBranchByPage()
     {
-        ray('Loading page '.$this->page);
         $response = Http::withToken($this->token)->get("{$this->github_app->api_url}/repos/{$this->selected_repository_owner}/{$this->selected_repository_repo}/branches?per_page=100&page={$this->page}");
         $json = $response->json();
         if ($response->status() !== 200) {
@@ -178,7 +166,7 @@ class GithubPrivateRepository extends Component
             $destination_class = $destination->getMorphClass();
 
             $project = Project::where('uuid', $this->parameters['project_uuid'])->first();
-            $environment = $project->load(['environments'])->environments->where('name', $this->parameters['environment_name'])->first();
+            $environment = $project->load(['environments'])->environments->where('uuid', $this->parameters['environment_uuid'])->first();
 
             $application = Application::create([
                 'name' => generate_application_name($this->selected_repository_owner.'/'.$this->selected_repository_repo, $this->selected_branch_name),
@@ -212,7 +200,7 @@ class GithubPrivateRepository extends Component
 
             return redirect()->route('project.application.configuration', [
                 'application_uuid' => $application->uuid,
-                'environment_name' => $environment->name,
+                'environment_uuid' => $environment->uuid,
                 'project_uuid' => $project->uuid,
             ]);
         } catch (\Throwable $e) {

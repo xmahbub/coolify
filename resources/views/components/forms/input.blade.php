@@ -16,7 +16,7 @@
         <div class="relative" x-data="{ type: 'password' }">
             @if ($allowToPeak)
                 <div x-on:click="changePasswordFieldType"
-                    class="flex absolute inset-y-0 right-0 items-center pr-2 cursor-pointer hover:dark:text-white">
+                    class="flex absolute inset-y-0 right-0 items-center pr-2 cursor-pointer dark:hover:text-white">
                     <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" stroke-width="1.5"
                         stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
                         <path stroke="none" d="M0 0h24v24H0z" fill="none" />
@@ -41,8 +41,9 @@
             @if ($id !== 'null') wire:model={{ $id }} @endif
             wire:dirty.class.remove='dark:focus:ring-coolgray-300 dark:ring-coolgray-300'
             wire:dirty.class="dark:focus:ring-warning dark:ring-warning" wire:loading.attr="disabled"
-            type="{{ $type }}" @disabled($disabled)
-            min="{{ $attributes->get('min') }}" max="{{ $attributes->get('max') }}"
+            type="{{ $type }}" @disabled($disabled) min="{{ $attributes->get('min') }}"
+            max="{{ $attributes->get('max') }}" minlength="{{ $attributes->get('minlength') }}"
+            maxlength="{{ $attributes->get('maxlength') }}"
             @if ($id !== 'null') id={{ $id }} @endif name="{{ $name }}"
             placeholder="{{ $attributes->get('placeholder') }}">
     @endif

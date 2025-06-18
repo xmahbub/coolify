@@ -136,7 +136,7 @@ class GithubPrivateRepositoryDeployKey extends Component
             $this->get_git_source();
 
             $project = Project::where('uuid', $this->parameters['project_uuid'])->first();
-            $environment = $project->load(['environments'])->environments->where('name', $this->parameters['environment_name'])->first();
+            $environment = $project->load(['environments'])->environments->where('uuid', $this->parameters['environment_uuid'])->first();
             if ($this->git_source === 'other') {
                 $application_init = [
                     'name' => generate_random_name(),
@@ -184,7 +184,7 @@ class GithubPrivateRepositoryDeployKey extends Component
 
             return redirect()->route('project.application.configuration', [
                 'application_uuid' => $application->uuid,
-                'environment_name' => $environment->name,
+                'environment_uuid' => $environment->uuid,
                 'project_uuid' => $project->uuid,
             ]);
         } catch (\Throwable $e) {
@@ -198,7 +198,7 @@ class GithubPrivateRepositoryDeployKey extends Component
         $this->git_host = $this->repository_url_parsed->getHost();
         $this->git_repository = $this->repository_url_parsed->getSegment(1).'/'.$this->repository_url_parsed->getSegment(2);
 
-        if ($this->git_host == 'github.com') {
+        if ($this->git_host === 'github.com') {
             $this->git_source = GithubApp::where('name', 'Public GitHub')->first();
 
             return;

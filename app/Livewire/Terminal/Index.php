@@ -14,13 +14,27 @@ class Index extends Component
 
     public $containers = [];
 
+    public bool $isLoadingContainers = true;
+
     public function mount()
     {
         if (! auth()->user()->isAdmin()) {
             abort(403);
         }
-        $this->servers = Server::isReachable()->get();
-        $this->containers = $this->getAllActiveContainers();
+        $this->servers = Server::isReachable()->get()->filter(function ($server) {
+            return $server->isTerminalEnabled();
+        });
+    }
+
+    public function loadContainers()
+    {
+        try {
+            $this->containers = $this->getAllActiveContainers();
+        } catch (\Exception $e) {
+            return handleError($e, $this);
+        } finally {
+            $this->isLoadingContainers = false;
+        }
     }
 
     private function getAllActiveContainers()

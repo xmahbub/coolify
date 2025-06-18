@@ -2,7 +2,7 @@
     <x-slot:title>
         Servers | Coolify
     </x-slot>
-    <div class="flex items-start gap-2">
+    <div class="flex items-center gap-2">
         <h1>Servers</h1>
         <x-modal-input buttonTitle="+ Add" title="New Server" :closeOutside="false">
             <livewire:server.create />
@@ -54,10 +54,5 @@
                 <span>{{ $error }}</span>
             </div>
         @endisset
-        <script>
-            function goto(uuid) {
-                window.location.href = '/server/' + uuid;
-            }
-        </script>
     </div>
 </div>

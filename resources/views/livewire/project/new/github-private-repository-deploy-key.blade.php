@@ -8,7 +8,7 @@
                 @forelse ($private_keys as $key)
                     @if ($private_key_id == $key->id)
                         <div class="gap-2 py-4 cursor-pointer group hover:bg-coollabs bg-coolgray-200 box"
-                            wire:click.defer="setPrivateKey('{{ $key->id }}')" wire:key="{{ $key->id }}">
+                            wire:click="setPrivateKey('{{ $key->id }}')" wire:key="{{ $key->id }}">
                             <div class="flex flex-col mx-6">
                                 <div class="box-title">
                                     {{ $key->name }}
@@ -21,7 +21,7 @@
                         </div>
                     @else
                         <div class="gap-2 py-4 cursor-pointer group hover:bg-coollabs bg-coolgray-200 box"
-                            wire:click.defer="setPrivateKey('{{ $key->id }}')" wire:key="{{ $key->id }}">
+                            wire:click="setPrivateKey('{{ $key->id }}')" wire:key="{{ $key->id }}">
                             <div class="flex flex-col mx-6">
                                 <div class="box-title">
                                     {{ $key->name }}
@@ -62,7 +62,7 @@
                     @endif
                 </div>
                 @if ($build_pack === 'dockercompose')
-                    <x-forms.input placeholder="/" wire:model.blur="base_directory" label="Base Directory"
+                    <x-forms.input placeholder="/" wire:model.blur-sm="base_directory" label="Base Directory"
                         helper="Directory to use as root. Useful for monorepos." />
                     <x-forms.input placeholder="/docker-compose.yaml" id="docker_compose_location"
                         label="Docker Compose Location"

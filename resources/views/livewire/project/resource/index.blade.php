@@ -7,15 +7,15 @@
             <h1>Resources</h1>
             @if ($environment->isEmpty())
                 <a class="button"
-                    href="{{ route('project.clone-me', ['project_uuid' => data_get($project, 'uuid'), 'environment_name' => data_get($parameters, 'environment_name')]) }}">
+                    href="{{ route('project.clone-me', ['project_uuid' => data_get($project, 'uuid'), 'environment_uuid' => data_get($environment, 'uuid')]) }}">
                     Clone
                 </a>
             @else
-                <a href="{{ route('project.resource.create', ['project_uuid' => data_get($parameters, 'project_uuid'), 'environment_name' => data_get($parameters, 'environment_name')]) }}  "
+                <a href="{{ route('project.resource.create', ['project_uuid' => data_get($parameters, 'project_uuid'), 'environment_uuid' => data_get($environment, 'uuid')]) }}"
                     class="button">+
                     New</a>
                 <a class="button"
-                    href="{{ route('project.clone-me', ['project_uuid' => data_get($project, 'uuid'), 'environment_name' => data_get($parameters, 'environment_name')]) }}">
+                    href="{{ route('project.clone-me', ['project_uuid' => data_get($project, 'uuid'), 'environment_uuid' => data_get($environment, 'uuid')]) }}">
                     Clone
                 </a>
             @endif
@@ -44,17 +44,22 @@
         </nav>
     </div>
     @if ($environment->isEmpty())
-    <a href="{{ route('project.resource.create', ['project_uuid' => data_get($parameters, 'project_uuid'), 'environment_name' => data_get($parameters, 'environment_name')]) }} "
+        <a href="{{ route('project.resource.create', ['project_uuid' => data_get($parameters, 'project_uuid'), 'environment_uuid' => data_get($environment, 'uuid')]) }}"
             class="items-center justify-center box">+ Add New Resource</a>
     @else
         <div x-data="searchComponent()">
             <x-forms.input placeholder="Search for name, fqdn..." x-model="search" id="null" />
-            <div class="grid grid-cols-1 gap-4 pt-4 lg:grid-cols-2 xl:grid-cols-3">
-                <template x-if="allFilteredItems.length === 0">
-                    <div>No resource found with the search term "<span x-text="search"></span>".</div>
-                </template>
+            <template
+                x-if="filteredApplications.length === 0 && filteredDatabases.length === 0 && filteredServices.length === 0">
+                <div>No resource found with the search term "<span x-text="search"></span>".</div>
+            </template>
 
-                <template x-for="item in allFilteredItems" :key="item.uuid">
+            <template x-if="filteredApplications.length > 0">
+                <h2 class="pt-4">Applications</h2>
+            </template>
+            <div x-show="filteredApplications.length > 0"
+                class="grid grid-cols-1 gap-4 pt-4 lg:grid-cols-2 xl:grid-cols-3">
+                <template x-for="item in filteredApplications" :key="item.uuid">
                     <span>
                         <a class="h-24 box group" :href="item.hrefLink">
                             <div class="flex flex-col w-full">
@@ -62,16 +67,16 @@
                                     <div class="pb-2 truncate box-title" x-text="item.name"></div>
                                     <div class="flex-1"></div>
                                     <template x-if="item.status.startsWith('running')">
-                                        <div title="running" class="bg-success badge badge-absolute"></div>
+                                        <div title="running" class="bg-success badge-dashboard"></div>
                                     </template>
                                     <template x-if="item.status.startsWith('exited')">
-                                        <div title="exited" class="bg-error badge badge-absolute"></div>
+                                        <div title="exited" class="bg-error badge-dashboard"></div>
                                     </template>
                                     <template x-if="item.status.startsWith('restarting')">
-                                        <div title="restarting" class="bg-warning badge badge-absolute"></div>
+                                        <div title="restarting" class="bg-warning badge-dashboard"></div>
                                     </template>
                                     <template x-if="item.status.startsWith('degraded')">
-                                        <div title="degraded" class="bg-warning badge badge-absolute"></div>
+                                        <div title="degraded" class="bg-warning badge-dashboard"></div>
                                     </template>
                                 </div>
                                 <div class="max-w-full px-4 truncate box-description" x-text="item.description"></div>
@@ -83,11 +88,106 @@
                             </div>
                         </a>
                         <div
-                            class="flex flex-wrap gap-1 pt-1 group-hover:dark:text-white group-hover:text-black group min-h-6">
+                            class="flex flex-wrap gap-1 pt-1 dark:group-hover:text-white group-hover:text-black group min-h-6">
                             <template x-for="tag in item.tags">
-                                <div class="tag" @click.prevent="gotoTag(tag.name)" x-text="tag.name"></div>
+                                <a :href="`/tags/${tag.name}`" class="tag" x-text="tag.name">
+                                </a>
                             </template>
-                            <div class="add-tag" @click.prevent="goto(item)">Add tag</div>
+                            <a :href="`${item.hrefLink}/tags`" class="add-tag">
+                                Add tag
+                            </a>
+                        </div>
+                    </span>
+                </template>
+            </div>
+            <template x-if="filteredDatabases.length > 0">
+                <h2 class="pt-4">Databases</h2>
+            </template>
+            <div x-show="filteredDatabases.length > 0"
+                class="grid grid-cols-1 gap-4 pt-4 lg:grid-cols-2 xl:grid-cols-3">
+                <template x-for="item in filteredDatabases" :key="item.uuid">
+                    <span>
+                        <a class="h-24 box group" :href="item.hrefLink">
+                            <div class="flex flex-col w-full">
+                                <div class="flex gap-2 px-4">
+                                    <div class="pb-2 truncate box-title" x-text="item.name"></div>
+                                    <div class="flex-1"></div>
+                                    <template x-if="item.status.startsWith('running')">
+                                        <div title="running" class="bg-success badge-dashboard"></div>
+                                    </template>
+                                    <template x-if="item.status.startsWith('exited')">
+                                        <div title="exited" class="bg-error badge-dashboard"></div>
+                                    </template>
+                                    <template x-if="item.status.startsWith('restarting')">
+                                        <div title="restarting" class="bg-warning badge-dashboard"></div>
+                                    </template>
+                                    <template x-if="item.status.startsWith('degraded')">
+                                        <div title="degraded" class="bg-warning badge-dashboard"></div>
+                                    </template>
+                                </div>
+                                <div class="max-w-full px-4 truncate box-description" x-text="item.description"></div>
+                                <div class="max-w-full px-4 truncate box-description" x-text="item.fqdn"></div>
+                                <template x-if="item.server_status == false">
+                                    <div class="px-4 text-xs font-bold text-error">The underlying server has problems
+                                    </div>
+                                </template>
+                            </div>
+                        </a>
+                        <div
+                            class="flex flex-wrap gap-1 pt-1 dark:group-hover:text-white group-hover:text-black group min-h-6">
+                            <template x-for="tag in item.tags">
+                                <a :href="`/tags/${tag.name}`" class="tag" x-text="tag.name">
+                                </a>
+                            </template>
+                            <a :href="`${item.hrefLink}/tags`" class="add-tag">
+                                Add tag
+                            </a>
+                        </div>
+                    </span>
+                </template>
+            </div>
+            <template x-if="filteredServices.length > 0">
+                <h2 class="pt-4">Services</h2>
+            </template>
+            <div x-show="filteredServices.length > 0"
+                class="grid grid-cols-1 gap-4 pt-4 lg:grid-cols-2 xl:grid-cols-3">
+                <template x-for="item in filteredServices" :key="item.uuid">
+                    <span>
+                        <a class="h-24 box group" :href="item.hrefLink">
+                            <div class="flex flex-col w-full">
+                                <div class="flex gap-2 px-4">
+                                    <div class="pb-2 truncate box-title" x-text="item.name"></div>
+                                    <div class="flex-1"></div>
+                                    <template x-if="item.status.startsWith('running')">
+                                        <div title="running" class="bg-success badge-dashboard"></div>
+                                    </template>
+                                    <template x-if="item.status.startsWith('exited')">
+                                        <div title="exited" class="bg-error badge-dashboard"></div>
+                                    </template>
+                                    <template x-if="item.status.startsWith('restarting')">
+                                        <div title="restarting" class="bg-warning badge-dashboard"></div>
+                                    </template>
+                                    <template x-if="item.status.startsWith('degraded')">
+                                        <div title="degraded" class="bg-warning badge-dashboard"></div>
+                                    </template>
+                                </div>
+                                <div class="max-w-full px-4 truncate box-description" x-text="item.description"></div>
+                                <div class="max-w-full px-4 truncate box-description" x-text="item.fqdn"></div>
+                                <template x-if="item.server_status == false">
+                                    <div class="px-4 text-xs font-bold text-error">The underlying server has problems
+                                    </div>
+                                </template>
+                            </div>
+                        </a>
+                        <div
+                            class="flex flex-wrap gap-1 pt-1 dark:group-hover:text-white group-hover:text-black group min-h-6">
+                            <template x-for="tag in item.tags">
+                                <a :href="`/tags/${tag.name}`" class="tag" x-text="tag.name">
+                                </a>
+                            </template>
+                            <a :href="`${item.hrefLink}/tags`" class="add-tag">
+                                Add tag
+                            </a>
                         </div>
                     </span>
                 </template>
@@ -115,13 +215,6 @@
             dragonflies: @js($dragonflies),
             clickhouses: @js($clickhouses),
             services: @js($services),
-            gotoTag(tag) {
-                window.location.href = '/tags/' + tag;
-            },
-            goto(item) {
-                const hrefLink = item.hrefLink;
-                window.location.href = `${hrefLink}#tags`;
-            },
             filterAndSort(items) {
                 if (this.search === '') {
                     return Object.values(items).sort(sortFn);
@@ -134,9 +227,11 @@
                         item.tags?.some(tag => tag.name.toLowerCase().includes(searchLower)));
                 }).sort(sortFn);
             },
-            get allFilteredItems() {
+            get filteredApplications() {
+                return this.filterAndSort(this.applications)
+            },
+            get filteredDatabases() {
                 return [
-                    this.applications,
                     this.postgresqls,
                     this.redis,
                     this.mongodbs,
@@ -145,8 +240,10 @@
                     this.keydbs,
                     this.dragonflies,
                     this.clickhouses,
-                    this.services
                 ].flatMap((items) => this.filterAndSort(items))
+            },
+            get filteredServices() {
+                return this.filterAndSort(this.services)
             }
         };
     }

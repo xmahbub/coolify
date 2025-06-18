@@ -12,9 +12,10 @@
     <div class="pb-4">Deploy resources, like Applications, Databases, Services...</div>
     <div x-data="searchResources()">
         @if ($current_step === 'type')
-            <div class="sticky top-0 z-50 py-2">
-                <input autocomplete="off" x-ref="searchInput" class="input w-full" x-model="search"
-                    placeholder="Type / to search..." @keydown.window.slash.prevent="$refs.searchInput.focus()">
+            <div x-init="window.addEventListener('scroll', () => isSticky = window.pageYOffset > 100)" class="sticky top-0 z-50 py-2">
+                <input autocomplete="off" x-ref="searchInput" class="input-sticky"
+                    :class="{ 'input-sticky-active': isSticky }" x-model="search" placeholder="Type / to search..."
+                    @keydown.window.slash.prevent="$refs.searchInput.focus()">
             </div>
             <div x-show="loading">Loading...</div>
             <div x-show="!loading" class="flex flex-col gap-4 py-4">
@@ -23,15 +24,15 @@
                 <div x-show="filteredGitBasedApplications.length > 0"
                     class="grid justify-start grid-cols-1 gap-4 text-left xl:grid-cols-1">
                     <template x-for="application in filteredGitBasedApplications" :key="application.name">
-                        <div x-on:click='setType(application.id)'>
+                        <div x-on:click='setType(application.id)'
+                            :class="{ 'cursor-pointer': !selecting, 'cursor-not-allowed opacity-50': selecting }">
                             <x-resource-view>
                                 <x-slot:title><span x-text="application.name"></span></x-slot>
                                 <x-slot:description>
                                     <span x-html="application.description"></span>
                                 </x-slot>
                                 <x-slot:logo>
-                                    <img class="w-[4.5rem]
-                            aspect-square h-[4.5rem] p-2 transition-all duration-200 opacity-30 grayscale group-hover:grayscale-0 group-hover:opacity-100 "
+                                    <img class="w-[4.5rem] aspect-square h-[4.5rem] p-2 transition-all duration-200 dark:opacity-30 grayscale group-hover:grayscale-0 group-hover:opacity-100 dark:bg-white/10 bg-black/10"
                                         :src="application.logo">
                                 </x-slot:logo>
                             </x-resource-view>
@@ -42,13 +43,13 @@
                 <div x-show="filteredDockerBasedApplications.length > 0"
                     class="grid justify-start grid-cols-1 gap-4 text-left xl:grid-cols-3">
                     <template x-for="application in filteredDockerBasedApplications" :key="application.name">
-                        <div x-on:click="setType(application.id)">
+                        <div x-on:click="setType(application.id)"
+                            :class="{ 'cursor-pointer': !selecting, 'cursor-not-allowed opacity-50': selecting }">
                             <x-resource-view>
                                 <x-slot:title><span x-text="application.name"></span></x-slot>
                                 <x-slot:description><span x-text="application.description"></span></x-slot>
                                 <x-slot:logo> <img
-                                        class="w-[4.5rem]
-                            aspect-square h-[4.5rem] p-2 transition-all duration-200 opacity-30 grayscale group-hover:grayscale-0 group-hover:opacity-100 "
+                                        class="w-[4.5rem] aspect-square h-[4.5rem] p-2 transition-all duration-200 dark:opacity-30 grayscale group-hover:grayscale-0 group-hover:opacity-100 dark:bg-white/10 bg-black/10 "
                                         :src="application.logo"></x-slot>
                             </x-resource-view>
                         </div>
@@ -58,7 +59,8 @@
                 <div x-show="filteredDatabases.length > 0"
                     class="grid justify-start grid-cols-1 gap-4 text-left xl:grid-cols-2">
                     <template x-for="database in filteredDatabases" :key="database.id">
-                        <div x-on:click="setType(database.id)">
+                        <div x-on:click="setType(database.id)"
+                            :class="{ 'cursor-pointer': !selecting, 'cursor-not-allowed opacity-50': selecting }">
                             <x-resource-view>
                                 <x-slot:title><span x-text="database.name"></span></x-slot>
                                 <x-slot:description><span x-text="database.description"></span></x-slot>
@@ -81,12 +83,13 @@
                         respective
                         companies, and use of them does not imply any affiliation or endorsement.<br>Find more services
                         <a class="dark:text-white underline" target="_blank"
-                            href="https://coolify.io/docs/services">here</a>.
+                            href="https://coolify.io/docs/services/overview">here</a>.
                     </div>
 
                     <div class="grid justify-start grid-cols-1 gap-4 text-left xl:grid-cols-2">
                         <template x-for="service in filteredServices" :key="service.name">
-                            <div x-on:click="setType('one-click-service-' + service.name)">
+                            <div x-on:click="setType('one-click-service-' + service.name)"
+                                :class="{ 'cursor-pointer': !selecting, 'cursor-not-allowed opacity-50': selecting }">
                                 <x-resource-view>
                                     <x-slot:title>
                                         <template x-if="service.name">
@@ -100,14 +103,18 @@
                                     </x-slot>
                                     <x-slot:logo>
                                         <template x-if="service.logo">
-                                            <img class="w-[4.5rem] aspect-square h-[4.5rem] p-2 transition-all duration-200 opacity-30 grayscale group-hover:grayscale-0 group-hover:opacity-100"
-                                                :src='service.logo'>
+                                            <img class="w-[4.5rem] aspect-square h-[4.5rem] p-2 transition-all duration-200 dark:opacity-30 grayscale group-hover:grayscale-0 group-hover:opacity-100 dark:bg-white/10 bg-black/10"
+                                                :src='service.logo'
+                                                x-on:error.window="$event.target.src = service.logo_github_url"
+                                                onerror="this.onerror=null; this.src=this.getAttribute('data-fallback');"
+                                                x-on:error="$event.target.src = '/coolify-logo.svg'"
+                                                :data-fallback='service.logo_github_url' />
                                         </template>
                                     </x-slot:logo>
                                     <x-slot:documentation>
                                         <template x-if="service.documentation">
                                             <div class="flex items-center px-2" title="Read the documentation.">
-                                                <a class="p-2 rounded hover:bg-coolgray-200 hover:no-underline group-hover:dark:text-white text-neutral-600"
+                                                <a class="p-2 rounded-sm hover:bg-gray-100 dark:hover:bg-coolgray-200 hover:no-underline dark:group-hover:text-white text-neutral-600"
                                                     onclick="event.stopPropagation()" :href="service.documentation"
                                                     target="_blank">
                                                     Docs
@@ -134,11 +141,15 @@
                     return {
                         search: '',
                         loading: false,
+                        isSticky: false,
+                        selecting: false,
                         services: [],
                         gitBasedApplications: [],
                         dockerBasedApplications: [],
                         databases: [],
                         setType(type) {
+                            if (this.selecting) return;
+                            this.selecting = true;
                             this.$wire.setType(type);
                         },
                         async loadResources() {
@@ -166,7 +177,8 @@
                             }
                             const filtered = Object.values(items).filter(item => {
                                 return (item.name?.toLowerCase().includes(searchLower) ||
-                                    item.description?.toLowerCase().includes(searchLower))
+                                    item.description?.toLowerCase().includes(searchLower) ||
+                                    item.slogan?.toLowerCase().includes(searchLower))
                             })
                             return isSort ? filtered.sort(sortFn) : filtered;
                         },
@@ -205,34 +217,39 @@
                     }
                 }
             </script>
-    @endif
+        @endif
     </div>
     @if ($current_step === 'servers')
         <h2>Select a server</h2>
         <div class="pb-5"></div>
         <div class="flex flex-col justify-center gap-4 text-left xl:flex-row xl:flex-wrap">
-            @forelse($servers as $server)
-                <div class="w-full box group" wire:click="setServer({{ $server }})">
-                    <div class="flex flex-col mx-6">
-                        <div class="box-title">
-                            {{ $server->name }}
+            @if ($onlyBuildServerAvailable)
+                <div> Only build servers are available, you need at least one server that is not set as build
+                    server. <a class="underline dark:text-white" href="/servers">
+                        Go to servers page
+                    </a> </div>
+            @else
+                @forelse($servers as $server)
+                    <div class="w-full box group" wire:click="setServer({{ $server }})">
+                        <div class="flex flex-col mx-6">
+                            <div class="box-title">
+                                {{ $server->name }}
+                            </div>
+                            <div class="box-description">
+                                {{ $server->description }}</div>
                         </div>
-                        <div class="box-description">
-                            {{ $server->description }}</div>
                     </div>
-                </div>
-            @empty
-                <div>
-                    <div>No validated & reachable servers found. <a class="underline dark:text-white" href="/servers">
-                            Go to servers page
-                        </a></div>
-                </div>
-            @endforelse
+                @empty
+                    <div>
+
+                        <div>No validated & reachable servers found. <a class="underline dark:text-white"
+                                href="/servers">
+                                Go to servers page
+                            </a></div>
+                    </div>
+                @endforelse
+            @endif
         </div>
-        {{-- @if ($isDatabase)
-                <div class="text-center">Swarm clusters are excluded from this type of resource at the moment. It will
-                    be activated soon. Stay tuned.</div>
-            @endif --}}
     @endif
     @if ($current_step === 'destinations')
         <h2>Select a destination</h2>
@@ -243,7 +260,7 @@
                 @foreach ($swarmDockers as $swarmDocker)
                     <div class="w-full box group" wire:click="setDestination('{{ $swarmDocker->uuid }}')">
                         <div class="flex flex-col mx-6">
-                            <div class="font-bold group-hover:dark:text-white">
+                            <div class="font-bold dark:group-hover:text-white">
                                 Swarm Docker <span class="text-xs">({{ $swarmDocker->name }})</span>
                             </div>
                         </div>
@@ -265,15 +282,18 @@
         </div>
     @endif
     @if ($current_step === 'select-postgresql-type')
-        <h2>Select a Postgresql type</h2>
-        <div>If you need extra extensions, you can select Supabase PostgreSQL (or others), otherwise select PostgreSQL
-            16 (default).</div>
-        <div class="flex flex-col gap-4">
-            <div class="flex flex-col gap-2">
-                <div class="gap-2 border border-transparent cursor-pointer box-without-bg dark:bg-coolgray-100 bg-white dark:hover:text-neutral-400 dark:hover:bg-coollabs group flex"
-                    wire:click="setPostgresqlType('postgres:16-alpine')">
+        <div x-data="{ selecting: false }">
+            <h2>Select a Postgresql type</h2>
+            <div>If you need extra extensions, you can select Supabase PostgreSQL (or others), otherwise select
+                PostgreSQL
+                17 (default).</div>
+            <div class="flex flex-col gap-6 pt-8">
+                <div class="gap-2 border border-transparent box-without-bg dark:bg-coolgray-100 bg-white dark:hover:text-neutral-400 dark:hover:bg-coollabs group flex"
+                    :class="{ 'cursor-pointer': !selecting, 'cursor-not-allowed opacity-50': selecting }"
+                    x-on:click="!selecting && (selecting = true, $wire.setPostgresqlType('postgres:17-alpine'))"
+                    :disabled="selecting">
                     <div class="flex flex-col">
-                        <div class="box-title">PostgreSQL 16 (default)</div>
+                        <div class="box-title">PostgreSQL 17 (default)</div>
                         <div class="box-description">
                             PostgreSQL is a powerful, open-source object-relational database system (no extensions).
                         </div>
@@ -281,15 +301,17 @@
                     <div class="flex-1"></div>
 
                     <div class="flex items-center px-2" title="Read the documentation.">
-                        <a class="p-2 hover:underline group-hover:dark:text-white dark:text-white text-neutral-6000"
+                        <a class="p-2 hover:underline dark:group-hover:text-white dark:text-white text-neutral-6000"
                             onclick="event.stopPropagation()" href="https://hub.docker.com/_/postgres/"
                             target="_blank">
                             Documentation
                         </a>
                     </div>
                 </div>
-                <div class="gap-2 border border-transparent cursor-pointer box-without-bg dark:bg-coolgray-100 bg-white dark:hover:text-neutral-400 dark:hover:bg-coollabs group flex"
-                    wire:click="setPostgresqlType('supabase/postgres:15.6.1.113')">
+                <div class="gap-2 border border-transparent box-without-bg dark:bg-coolgray-100 bg-white dark:hover:text-neutral-400 dark:hover:bg-coollabs group flex"
+                    :class="{ 'cursor-pointer': !selecting, 'cursor-not-allowed opacity-50': selecting }"
+                    x-on:click="!selecting && (selecting = true, $wire.setPostgresqlType('supabase/postgres:17.4.1.032'))"
+                    :disabled="selecting">
                     <div class="flex flex-col">
                         <div class="box-title">Supabase PostgreSQL (with extensions)</div>
                         <div class="box-description">
@@ -298,34 +320,38 @@
                     </div>
                     <div class="flex-1"></div>
                     <div class="flex items-center px-2" title="Read the documentation.">
-                        <a class="p-2 hover:underline group-hover:dark:text-white dark:text-white text-neutral-600"
+                        <a class="p-2 hover:underline dark:group-hover:text-white dark:text-white text-neutral-600"
                             onclick="event.stopPropagation()" href="https://github.com/supabase/postgres"
                             target="_blank">
                             Documentation
                         </a>
                     </div>
                 </div>
-                <div class="gap-2 border border-transparent cursor-pointer box-without-bg dark:bg-coolgray-100 bg-white dark:hover:text-neutral-400 dark:hover:bg-coollabs group flex"
-                    wire:click="setPostgresqlType('postgis/postgis')">
+                <div class="gap-2 border border-transparent box-without-bg dark:bg-coolgray-100 bg-white dark:hover:text-neutral-400 dark:hover:bg-coollabs group flex"
+                    :class="{ 'cursor-pointer': !selecting, 'cursor-not-allowed opacity-50': selecting }"
+                    x-on:click="!selecting && (selecting = true, $wire.setPostgresqlType('postgis/postgis:17-3.5-alpine'))"
+                    :disabled="selecting">
                     <div class="flex flex-col">
-                        <div class="box-title">PostGIS</div>
+                        <div class="box-title">PostGIS (AMD only)</div>
                         <div class="box-description">
                             PostGIS is a PostgreSQL extension for geographic objects.
                         </div>
                     </div>
                     <div class="flex-1"></div>
                     <div class="flex items-center px-2" title="Read the documentation.">
-                        <a class="p-2 hover:underline group-hover:dark:text-white dark:text-white text-neutral-600"
+                        <a class="p-2 hover:underline dark:group-hover:text-white dark:text-white text-neutral-600"
                             onclick="event.stopPropagation()" href="https://github.com/postgis/docker-postgis"
                             target="_blank">
                             Documentation
                         </a>
                     </div>
                 </div>
-                <div class="gap-2 border border-transparent cursor-pointer box-without-bg dark:bg-coolgray-100 bg-white dark:hover:text-neutral-400 dark:hover:bg-coollabs group flex"
-                    wire:click="setPostgresqlType('pgvector/pgvector:pg16')">
+                <div class="gap-2 border border-transparent box-without-bg dark:bg-coolgray-100 bg-white dark:hover:text-neutral-400 dark:hover:bg-coollabs group flex"
+                    :class="{ 'cursor-pointer': !selecting, 'cursor-not-allowed opacity-50': selecting }"
+                    x-on:click="!selecting && (selecting = true, $wire.setPostgresqlType('pgvector/pgvector:pg17'))"
+                    :disabled="selecting">
                     <div class="flex flex-col">
-                        <div class="box-title">PGVector (16)</div>
+                        <div class="box-title">PGVector (17)</div>
                         <div class="box-description">
                             PGVector is a PostgreSQL extension for vector data types.
                         </div>
@@ -333,7 +359,7 @@
                     <div class="flex-1"></div>
 
                     <div class="flex items-center px-2" title="Read the documentation.">
-                        <a class="p-2 hover:underline group-hover:dark:text-white dark:text-white text-neutral-600"
+                        <a class="p-2 hover:underline dark:group-hover:text-white dark:text-white text-neutral-600"
                             onclick="event.stopPropagation()" href="https://github.com/pgvector/pgvector"
                             target="_blank">
                             Documentation

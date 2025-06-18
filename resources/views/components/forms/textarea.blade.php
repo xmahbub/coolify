@@ -33,7 +33,7 @@
             <div class="relative" x-data="{ type: 'password' }">
                 @if ($allowToPeak)
                     <div x-on:click="changePasswordFieldType"
-                        class="absolute inset-y-0 right-0 flex items-center h-6 pt-2 pr-2 cursor-pointer hover:dark:text-white">
+                        class="absolute inset-y-0 right-0 flex items-center h-6 pt-2 pr-2 cursor-pointer dark:hover:text-white">
                         <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" stroke-width="1.5"
                             stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
                             <path stroke="none" d="M0 0h24v24H0z" fill="none" />
@@ -51,8 +51,8 @@
                     type="{{ $type }}" @readonly($readonly) @disabled($disabled) id="{{ $id }}"
                     name="{{ $name }}" placeholder="{{ $attributes->get('placeholder') }}"
                     aria-placeholder="{{ $attributes->get('placeholder') }}">
-                <textarea x-cloak x-show="type !== 'password'" placeholder="{{ $placeholder }}"
-                    {{ $attributes->merge(['class' => $defaultClass]) }}
+                <textarea minlength="{{ $minlength }}" maxlength="{{ $maxlength }}" x-cloak x-show="type !== 'password'"
+                    placeholder="{{ $placeholder }}" {{ $attributes->merge(['class' => $defaultClass]) }}
                     @if ($realtimeValidation) wire:model.debounce.200ms="{{ $id }}"
                 @else
             wire:model={{ $value ?? $id }}
@@ -62,7 +62,8 @@
 
             </div>
         @else
-            <textarea {{ $allowTab ? '@keydown.tab=handleKeydown' : '' }} placeholder="{{ $placeholder }}"
+            <textarea minlength="{{ $minlength }}" maxlength="{{ $maxlength }}"
+                {{ $allowTab ? '@keydown.tab=handleKeydown' : '' }} placeholder="{{ $placeholder }}"
                 {{ !$spellcheck ? 'spellcheck=false' : '' }} {{ $attributes->merge(['class' => $defaultClass]) }}
                 @if ($realtimeValidation) wire:model.debounce.200ms="{{ $id }}"
         @else

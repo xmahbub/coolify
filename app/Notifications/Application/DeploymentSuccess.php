@@ -4,18 +4,14 @@ namespace App\Notifications\Application;
 
 use App\Models\Application;
 use App\Models\ApplicationPreview;
+use App\Notifications\CustomEmailNotification;
 use App\Notifications\Dto\DiscordMessage;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
+use App\Notifications\Dto\PushoverMessage;
+use App\Notifications\Dto\SlackMessage;
 use Illuminate\Notifications\Messages\MailMessage;
-use Illuminate\Notifications\Notification;
 
-class DeploymentSuccess extends Notification implements ShouldQueue
+class DeploymentSuccess extends CustomEmailNotification
 {
-    use Queueable;
-
-    public $tries = 1;
-
     public Application $application;
 
     public ?ApplicationPreview $preview = null;
@@ -26,6 +22,8 @@ class DeploymentSuccess extends Notification implements ShouldQueue
 
     public string $project_uuid;
 
+    public string $environment_uuid;
+
     public string $environment_name;
 
     public ?string $deployment_url = null;
@@ -34,28 +32,24 @@ class DeploymentSuccess extends Notification implements ShouldQueue
 
     public function __construct(Application $application, string $deployment_uuid, ?ApplicationPreview $preview = null)
     {
+        $this->onQueue('high');
         $this->application = $application;
         $this->deployment_uuid = $deployment_uuid;
         $this->preview = $preview;
         $this->application_name = data_get($application, 'name');
         $this->project_uuid = data_get($application, 'environment.project.uuid');
+        $this->environment_uuid = data_get($application, 'environment.uuid');
         $this->environment_name = data_get($application, 'environment.name');
         $this->fqdn = data_get($application, 'fqdn');
         if (str($this->fqdn)->explode(',')->count() > 1) {
             $this->fqdn = str($this->fqdn)->explode(',')->first();
         }
-        $this->deployment_url = base_url()."/project/{$this->project_uuid}/".urlencode($this->environment_name)."/application/{$this->application->uuid}/deployment/{$this->deployment_uuid}";
+        $this->deployment_url = base_url()."/project/{$this->project_uuid}/environment/{$this->environment_uuid}/application/{$this->application->uuid}/deployment/{$this->deployment_uuid}";
     }
 
     public function via(object $notifiable): array
     {
-        $channels = setNotificationChannels($notifiable, 'deployments');
-        if (isCloud()) {
-            // TODO: Make batch notifications work with email
-            $channels = array_diff($channels, ['App\Notifications\Channels\EmailChannel']);
-        }
-
-        return $channels;
+        return $notifiable->getEnabledChannels('deployment_success');
     }
 
     public function toMail(): MailMessage
@@ -147,5 +141,68 @@ class DeploymentSuccess extends Notification implements ShouldQueue
                 ...$buttons,
             ],
         ];
+    }
+
+    public function toPushover(): PushoverMessage
+    {
+        if ($this->preview) {
+            $title = "Pull request #{$this->preview->pull_request_id} successfully deployed";
+            $message = 'New PR'.$this->preview->pull_request_id.' version successfully deployed of '.$this->application_name.'';
+            if ($this->preview->fqdn) {
+                $buttons[] = [
+                    'text' => 'Open Application',
+                    'url' => $this->preview->fqdn,
+                ];
+            }
+        } else {
+            $title = 'New version successfully deployed';
+            $message = 'New version successfully deployed of '.$this->application_name.'';
+            if ($this->fqdn) {
+                $buttons[] = [
+                    'text' => 'Open Application',
+                    'url' => $this->fqdn,
+                ];
+            }
+        }
+        $buttons[] = [
+            'text' => 'Deployment logs',
+            'url' => $this->deployment_url,
+        ];
+
+        return new PushoverMessage(
+            title: $title,
+            level: 'success',
+            message: $message,
+            buttons: [
+                ...$buttons,
+            ],
+        );
+    }
+
+    public function toSlack(): SlackMessage
+    {
+        if ($this->preview) {
+            $title = "Pull request #{$this->preview->pull_request_id} successfully deployed";
+            $description = "New version successfully deployed for {$this->application_name}";
+            if ($this->preview->fqdn) {
+                $description .= "\nPreview URL: {$this->preview->fqdn}";
+            }
+        } else {
+            $title = 'New version successfully deployed';
+            $description = "New version successfully deployed for {$this->application_name}";
+            if ($this->fqdn) {
+                $description .= "\nApplication URL: {$this->fqdn}";
+            }
+        }
+
+        $description .= "\n\n*Project:* ".data_get($this->application, 'environment.project.name');
+        $description .= "\n*Environment:* {$this->environment_name}";
+        $description .= "\n*<{$this->deployment_url}|Deployment Logs>*";
+
+        return new SlackMessage(
+            title: $title,
+            description: $description,
+            color: SlackMessage::successColor()
+        );
     }
 }

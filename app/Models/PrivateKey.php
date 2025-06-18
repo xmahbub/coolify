@@ -17,6 +17,8 @@ use phpseclib3\Crypt\PublicKeyLoader;
         'name' => ['type' => 'string'],
         'description' => ['type' => 'string'],
         'private_key' => ['type' => 'string', 'format' => 'private-key'],
+        'public_key' => ['type' => 'string', 'description' => 'The public key of the private key.'],
+        'fingerprint' => ['type' => 'string', 'description' => 'The fingerprint of the private key.'],
         'is_git_related' => ['type' => 'boolean'],
         'team_id' => ['type' => 'integer'],
         'created_at' => ['type' => 'string'],
@@ -40,6 +42,8 @@ class PrivateKey extends BaseModel
         'private_key' => 'encrypted',
     ];
 
+    protected $appends = ['public_key'];
+
     protected static function booted()
     {
         static::saving(function ($key) {
@@ -62,6 +66,11 @@ class PrivateKey extends BaseModel
         static::deleted(function ($key) {
             self::deleteFromStorage($key);
         });
+    }
+
+    public function getPublicKeyAttribute()
+    {
+        return self::extractPublicKeyFromPrivate($this->private_key) ?? 'Error loading private key';
     }
 
     public function getPublicKey()
@@ -208,20 +217,21 @@ class PrivateKey extends BaseModel
     {
         try {
             $key = PublicKeyLoader::load($privateKey);
-            $publicKey = $key->getPublicKey();
 
-            return $publicKey->getFingerprint('sha256');
+            return $key->getPublicKey()->getFingerprint('sha256');
         } catch (\Throwable $e) {
             return null;
         }
     }
 
-    private static function fingerprintExists($fingerprint, $excludeId = null)
+    public static function fingerprintExists($fingerprint, $excludeId = null)
     {
-        $query = self::where('fingerprint', $fingerprint);
+        $query = self::query()
+            ->where('fingerprint', $fingerprint)
+            ->where('id', '!=', $excludeId);
 
-        if (! is_null($excludeId)) {
-            $query->where('id', '!=', $excludeId);
+        if (currentTeam()) {
+            $query->where('team_id', currentTeam()->id);
         }
 
         return $query->exists();

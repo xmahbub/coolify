@@ -31,14 +31,32 @@ class GithubApp extends BaseModel
         });
     }
 
+    public static function ownedByCurrentTeam()
+    {
+        return GithubApp::where(function ($query) {
+            $query->where('team_id', currentTeam()->id)
+                ->orWhere('is_system_wide', true);
+        });
+    }
+
     public static function public()
     {
-        return GithubApp::whereTeamId(currentTeam()->id)->whereisPublic(true)->whereNotNull('app_id')->get();
+        return GithubApp::where(function ($query) {
+            $query->where(function ($q) {
+                $q->where('team_id', currentTeam()->id)
+                    ->orWhere('is_system_wide', true);
+            })->where('is_public', true);
+        })->whereNotNull('app_id')->get();
     }
 
     public static function private()
     {
-        return GithubApp::whereTeamId(currentTeam()->id)->whereisPublic(false)->whereNotNull('app_id')->get();
+        return GithubApp::where(function ($query) {
+            $query->where(function ($q) {
+                $q->where('team_id', currentTeam()->id)
+                    ->orWhere('is_system_wide', true);
+            })->where('is_public', false);
+        })->whereNotNull('app_id')->get();
     }
 
     public function team()
@@ -60,7 +78,7 @@ class GithubApp extends BaseModel
     {
         return Attribute::make(
             get: function () {
-                if ($this->getMorphClass() === 'App\Models\GithubApp') {
+                if ($this->getMorphClass() === \App\Models\GithubApp::class) {
                     return 'github';
                 }
             },

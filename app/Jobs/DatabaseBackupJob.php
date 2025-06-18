@@ -32,8 +32,6 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
 
     public Server $server;
 
-    public ScheduledDatabaseBackup $backup;
-
     public StandalonePostgresql|StandaloneMongodb|StandaloneMysql|StandaloneMariadb|ServiceDatabase $database;
 
     public ?string $container_name = null;
@@ -56,23 +54,29 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
 
     public ?string $postgres_password = null;
 
+    public ?string $mongo_root_username = null;
+
+    public ?string $mongo_root_password = null;
+
     public ?S3Storage $s3 = null;
 
-    public function __construct($backup)
+    public function __construct(public ScheduledDatabaseBackup $backup)
     {
-        $this->backup = $backup;
+        $this->onQueue('high');
     }
 
     public function handle(): void
     {
         try {
+            $databasesToBackup = null;
+
             $this->team = Team::find($this->backup->team_id);
             if (! $this->team) {
                 $this->backup->delete();
 
                 return;
             }
-            if (data_get($this->backup, 'database_type') === 'App\Models\ServiceDatabase') {
+            if (data_get($this->backup, 'database_type') === \App\Models\ServiceDatabase::class) {
                 $this->database = data_get($this->backup, 'database');
                 $this->server = $this->database->service->server;
                 $this->s3 = $this->backup->s3;
@@ -92,11 +96,9 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
 
             $status = str(data_get($this->database, 'status'));
             if (! $status->startsWith('running') && $this->database->id !== 0) {
-                ray('database not running');
-
                 return;
             }
-            if (data_get($this->backup, 'database_type') === 'App\Models\ServiceDatabase') {
+            if (data_get($this->backup, 'database_type') === \App\Models\ServiceDatabase::class) {
                 $databaseType = $this->database->databaseType();
                 $serviceUuid = $this->database->service->uuid;
                 $serviceName = str($this->database->service->name)->slug();
@@ -131,7 +133,6 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
                     if ($this->postgres_password) {
                         $this->postgres_password = str($this->postgres_password)->after('POSTGRES_PASSWORD=')->value();
                     }
-
                 } elseif (str($databaseType)->contains('mysql')) {
                     $this->container_name = "{$this->database->name}-$serviceUuid";
                     $this->directory_name = $serviceName.'-'.$this->container_name;
@@ -192,6 +193,40 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
                             throw new \Exception('MARIADB_DATABASE or MYSQL_DATABASE not found');
                         }
                     }
+                } elseif (str($databaseType)->contains('mongo')) {
+                    $databasesToBackup = ['*'];
+                    $this->container_name = "{$this->database->name}-$serviceUuid";
+                    $this->directory_name = $serviceName.'-'.$this->container_name;
+
+                    // Try to extract MongoDB credentials from environment variables
+                    try {
+                        $commands = [];
+                        $commands[] = "docker exec $this->container_name env | grep MONGO_INITDB_";
+                        $envs = instant_remote_process($commands, $this->server);
+
+                        if (filled($envs)) {
+                            $envs = str($envs)->explode("\n");
+                            $rootPassword = $envs->filter(function ($env) {
+                                return str($env)->startsWith('MONGO_INITDB_ROOT_PASSWORD=');
+                            })->first();
+                            if ($rootPassword) {
+                                $this->mongo_root_password = str($rootPassword)->after('MONGO_INITDB_ROOT_PASSWORD=')->value();
+                            }
+                            $rootUsername = $envs->filter(function ($env) {
+                                return str($env)->startsWith('MONGO_INITDB_ROOT_USERNAME=');
+                            })->first();
+                            if ($rootUsername) {
+                                $this->mongo_root_username = str($rootUsername)->after('MONGO_INITDB_ROOT_USERNAME=')->value();
+                            }
+                        }
+                        \Log::info('MongoDB credentials extracted from environment', [
+                            'has_username' => filled($this->mongo_root_username),
+                            'has_password' => filled($this->mongo_root_password),
+                        ]);
+                    } catch (\Throwable $e) {
+                        \Log::warning('Failed to extract MongoDB environment variables', ['error' => $e->getMessage()]);
+                        // Continue without env vars - will be handled in backup_standalone_mongodb method
+                    }
                 }
             } else {
                 $databaseName = str($this->database->name)->slug()->value();
@@ -200,11 +235,10 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
                 $databaseType = $this->database->type();
                 $databasesToBackup = data_get($this->backup, 'databases_to_backup');
             }
-
-            if (is_null($databasesToBackup)) {
+            if (blank($databasesToBackup)) {
                 if (str($databaseType)->contains('postgres')) {
                     $databasesToBackup = [$this->database->postgres_db];
-                } elseif (str($databaseType)->contains('mongodb')) {
+                } elseif (str($databaseType)->contains('mongo')) {
                     $databasesToBackup = ['*'];
                 } elseif (str($databaseType)->contains('mysql')) {
                     $databasesToBackup = [$this->database->mysql_database];
@@ -218,11 +252,13 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
                     // Format: db1,db2,db3
                     $databasesToBackup = explode(',', $databasesToBackup);
                     $databasesToBackup = array_map('trim', $databasesToBackup);
-                } elseif (str($databaseType)->contains('mongodb')) {
+                } elseif (str($databaseType)->contains('mongo')) {
                     // Format: db1:collection1,collection2|db2:collection3,collection4
-                    $databasesToBackup = explode('|', $databasesToBackup);
-                    $databasesToBackup = array_map('trim', $databasesToBackup);
-                    ray($databasesToBackup);
+                    // Only explode if it's a string, not if it's already an array
+                    if (is_string($databasesToBackup)) {
+                        $databasesToBackup = explode('|', $databasesToBackup);
+                        $databasesToBackup = array_map('trim', $databasesToBackup);
+                    }
                 } elseif (str($databaseType)->contains('mysql')) {
                     // Format: db1,db2,db3
                     $databasesToBackup = explode(',', $databasesToBackup);
@@ -244,7 +280,6 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
             }
             foreach ($databasesToBackup as $database) {
                 $size = 0;
-                ray('Backing up '.$database);
                 try {
                     if (str($databaseType)->contains('postgres')) {
                         $this->backup_file = "/pg-dump-$database-".Carbon::now()->timestamp.'.dmp';
@@ -258,7 +293,7 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
                             'scheduled_database_backup_id' => $this->backup->id,
                         ]);
                         $this->backup_standalone_postgresql($database);
-                    } elseif (str($databaseType)->contains('mongodb')) {
+                    } elseif (str($databaseType)->contains('mongo')) {
                         if ($database === '*') {
                             $database = 'all';
                             $databaseName = 'all';
@@ -305,11 +340,12 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
                         throw new \Exception('Unsupported database type');
                     }
                     $size = $this->calculate_size();
-                    $this->remove_old_backups();
                     if ($this->backup->save_s3) {
                         $this->upload_to_s3();
                     }
-                    $this->team?->notify(new BackupSuccess($this->backup, $this->database, $database));
+
+                    $this->team->notify(new BackupSuccess($this->backup, $this->database, $database));
+
                     $this->backup_log->update([
                         'status' => 'success',
                         'message' => $this->backup_output,
@@ -324,16 +360,22 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
                             'filename' => null,
                         ]);
                     }
-                    send_internal_notification('DatabaseBackupJob failed with: '.$e->getMessage());
                     $this->team?->notify(new BackupFailed($this->backup, $this->database, $this->backup_output, $database));
                 }
             }
+            if ($this->backup_log && $this->backup_log->status === 'success') {
+                removeOldBackups($this->backup);
+            }
         } catch (\Throwable $e) {
-            send_internal_notification('DatabaseBackupJob failed with: '.$e->getMessage());
             throw $e;
         } finally {
             if ($this->team) {
                 BackupCreated::dispatch($this->team->id);
+            }
+            if ($this->backup_log) {
+                $this->backup_log->update([
+                    'finished_at' => Carbon::now()->toImmutable(),
+                ]);
             }
         }
     }
@@ -342,12 +384,23 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
     {
         try {
             $url = $this->database->internal_db_url;
+            if (blank($url)) {
+                // For service-based MongoDB, try to build URL from environment variables
+                if (filled($this->mongo_root_username) && filled($this->mongo_root_password)) {
+                    // Use container name instead of server IP for service-based MongoDB
+                    $url = "mongodb://{$this->mongo_root_username}:{$this->mongo_root_password}@{$this->container_name}:27017";
+                } else {
+                    // If no environment variables are available, throw an exception
+                    throw new \Exception('MongoDB credentials not found. Ensure MONGO_INITDB_ROOT_USERNAME and MONGO_INITDB_ROOT_PASSWORD environment variables are available in the container.');
+                }
+            }
+            \Log::info('MongoDB backup URL configured', ['has_url' => filled($url), 'using_env_vars' => blank($this->database->internal_db_url)]);
             if ($databaseWithCollections === 'all') {
                 $commands[] = 'mkdir -p '.$this->backup_dir;
                 if (str($this->database->image)->startsWith('mongo:4')) {
-                    $commands[] = "docker exec $this->container_name mongodump --uri=$url --gzip --archive > $this->backup_location";
+                    $commands[] = "docker exec $this->container_name mongodump --uri=\"$url\" --gzip --archive > $this->backup_location";
                 } else {
-                    $commands[] = "docker exec $this->container_name mongodump --authenticationDatabase=admin --uri=$url --gzip --archive > $this->backup_location";
+                    $commands[] = "docker exec $this->container_name mongodump --authenticationDatabase=admin --uri=\"$url\" --gzip --archive > $this->backup_location";
                 }
             } else {
                 if (str($databaseWithCollections)->contains(':')) {
@@ -360,15 +413,15 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
                 $commands[] = 'mkdir -p '.$this->backup_dir;
                 if ($collectionsToExclude->count() === 0) {
                     if (str($this->database->image)->startsWith('mongo:4')) {
-                        $commands[] = "docker exec $this->container_name mongodump --uri=$url --gzip --archive > $this->backup_location";
+                        $commands[] = "docker exec $this->container_name mongodump --uri=\"$url\" --gzip --archive > $this->backup_location";
                     } else {
-                        $commands[] = "docker exec $this->container_name mongodump --authenticationDatabase=admin --uri=$url --db $databaseName --gzip --archive > $this->backup_location";
+                        $commands[] = "docker exec $this->container_name mongodump --authenticationDatabase=admin --uri=\"$url\" --db $databaseName --gzip --archive > $this->backup_location";
                     }
                 } else {
                     if (str($this->database->image)->startsWith('mongo:4')) {
                         $commands[] = "docker exec $this->container_name mongodump --uri=$url --gzip --excludeCollection ".$collectionsToExclude->implode(' --excludeCollection ')." --archive > $this->backup_location";
                     } else {
-                        $commands[] = "docker exec $this->container_name mongodump --authenticationDatabase=admin --uri=$url --db $databaseName --gzip --excludeCollection ".$collectionsToExclude->implode(' --excludeCollection ')." --archive > $this->backup_location";
+                        $commands[] = "docker exec $this->container_name mongodump --authenticationDatabase=admin --uri=\"$url\" --db $databaseName --gzip --excludeCollection ".$collectionsToExclude->implode(' --excludeCollection ')." --archive > $this->backup_location";
                     }
                 }
             }
@@ -377,10 +430,8 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
             if ($this->backup_output === '') {
                 $this->backup_output = null;
             }
-            ray('Backup done for '.$this->container_name.' at '.$this->server->name.':'.$this->backup_location);
         } catch (\Throwable $e) {
             $this->add_to_backup_output($e->getMessage());
-            ray('Backup failed for '.$this->container_name.' at '.$this->server->name.':'.$this->backup_location.'\n\nError:'.$e->getMessage());
             throw $e;
         }
     }
@@ -391,7 +442,7 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
             $commands[] = 'mkdir -p '.$this->backup_dir;
             $backupCommand = 'docker exec';
             if ($this->postgres_password) {
-                $backupCommand .= " -e PGPASSWORD=$this->postgres_password";
+                $backupCommand .= " -e PGPASSWORD=\"{$this->postgres_password}\"";
             }
             if ($this->backup->dump_all) {
                 $backupCommand .= " $this->container_name pg_dumpall --username {$this->database->postgres_user} | gzip > $this->backup_location";
@@ -400,16 +451,13 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
             }
 
             $commands[] = $backupCommand;
-            ray($commands);
             $this->backup_output = instant_remote_process($commands, $this->server);
             $this->backup_output = trim($this->backup_output);
             if ($this->backup_output === '') {
                 $this->backup_output = null;
             }
-            ray('Backup done for '.$this->container_name.' at '.$this->server->name.':'.$this->backup_location);
         } catch (\Throwable $e) {
             $this->add_to_backup_output($e->getMessage());
-            ray('Backup failed for '.$this->container_name.' at '.$this->server->name.':'.$this->backup_location.'\n\nError:'.$e->getMessage());
             throw $e;
         }
     }
@@ -419,19 +467,17 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
         try {
             $commands[] = 'mkdir -p '.$this->backup_dir;
             if ($this->backup->dump_all) {
-                $commands[] = "docker exec $this->container_name mysqldump -u root -p{$this->database->mysql_root_password} --all-databases --single-transaction --quick --lock-tables=false --compress | gzip > $this->backup_location";
+                $commands[] = "docker exec $this->container_name mysqldump -u root -p\"{$this->database->mysql_root_password}\" --all-databases --single-transaction --quick --lock-tables=false --compress | gzip > $this->backup_location";
             } else {
-                $commands[] = "docker exec $this->container_name mysqldump -u root -p{$this->database->mysql_root_password} $database > $this->backup_location";
+                $commands[] = "docker exec $this->container_name mysqldump -u root -p\"{$this->database->mysql_root_password}\" $database > $this->backup_location";
             }
             $this->backup_output = instant_remote_process($commands, $this->server);
             $this->backup_output = trim($this->backup_output);
             if ($this->backup_output === '') {
                 $this->backup_output = null;
             }
-            ray('Backup done for '.$this->container_name.' at '.$this->server->name.':'.$this->backup_location);
         } catch (\Throwable $e) {
             $this->add_to_backup_output($e->getMessage());
-            ray('Backup failed for '.$this->container_name.' at '.$this->server->name.':'.$this->backup_location.'\n\nError:'.$e->getMessage());
             throw $e;
         }
     }
@@ -441,20 +487,17 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
         try {
             $commands[] = 'mkdir -p '.$this->backup_dir;
             if ($this->backup->dump_all) {
-                $commands[] = "docker exec $this->container_name mariadb-dump -u root -p{$this->database->mariadb_root_password} --all-databases --single-transaction --quick --lock-tables=false --compress > $this->backup_location";
+                $commands[] = "docker exec $this->container_name mariadb-dump -u root -p\"{$this->database->mariadb_root_password}\" --all-databases --single-transaction --quick --lock-tables=false --compress > $this->backup_location";
             } else {
-                $commands[] = "docker exec $this->container_name mariadb-dump -u root -p{$this->database->mariadb_root_password} $database > $this->backup_location";
+                $commands[] = "docker exec $this->container_name mariadb-dump -u root -p\"{$this->database->mariadb_root_password}\" $database > $this->backup_location";
             }
-            ray($commands);
             $this->backup_output = instant_remote_process($commands, $this->server);
             $this->backup_output = trim($this->backup_output);
             if ($this->backup_output === '') {
                 $this->backup_output = null;
             }
-            ray('Backup done for '.$this->container_name.' at '.$this->server->name.':'.$this->backup_location);
         } catch (\Throwable $e) {
             $this->add_to_backup_output($e->getMessage());
-            ray('Backup failed for '.$this->container_name.' at '.$this->server->name.':'.$this->backup_location.'\n\nError:'.$e->getMessage());
             throw $e;
         }
     }
@@ -473,19 +516,6 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
         return instant_remote_process(["du -b $this->backup_location | cut -f1"], $this->server, false);
     }
 
-    private function remove_old_backups(): void
-    {
-        if ($this->backup->number_of_backups_locally === 0) {
-            $deletable = $this->backup->executions()->where('status', 'success');
-        } else {
-            $deletable = $this->backup->executions()->where('status', 'success')->skip($this->backup->number_of_backups_locally - 1);
-        }
-        foreach ($deletable->get() as $execution) {
-            delete_backup_locally($execution->filename, $this->server);
-            $execution->delete();
-        }
-    }
-
     private function upload_to_s3(): void
     {
         try {
@@ -498,13 +528,18 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
             $bucket = $this->s3->bucket;
             $endpoint = $this->s3->endpoint;
             $this->s3->testConnection(shouldSave: true);
-            if (data_get($this->backup, 'database_type') === 'App\Models\ServiceDatabase') {
+            if (data_get($this->backup, 'database_type') === \App\Models\ServiceDatabase::class) {
                 $network = $this->database->service->destination->network;
             } else {
                 $network = $this->database->destination->network;
             }
 
             $fullImageName = $this->getFullImageName();
+
+            $containerExists = instant_remote_process(["docker ps -a -q -f name=backup-of-{$this->backup->uuid}"], $this->server, false);
+            if (filled($containerExists)) {
+                instant_remote_process(["docker rm -f backup-of-{$this->backup->uuid}"], $this->server, false);
+            }
 
             if (isDev()) {
                 if ($this->database->name === 'coolify-db') {
@@ -517,12 +552,7 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
             } else {
                 $commands[] = "docker run -d --network {$network} --name backup-of-{$this->backup->uuid} --rm -v $this->backup_location:$this->backup_location:ro {$fullImageName}";
             }
-            if ($this->s3->isHetzner()) {
-                $endpointWithoutBucket = 'https://'.str($endpoint)->after('https://')->after('.')->value();
-                $commands[] = "docker exec backup-of-{$this->backup->uuid} mc alias set --path=off --api=S3v4 temporary {$endpointWithoutBucket} $key $secret";
-            } else {
-                $commands[] = "docker exec backup-of-{$this->backup->uuid} mc config host add temporary {$endpoint} $key $secret";
-            }
+            $commands[] = "docker exec backup-of-{$this->backup->uuid} mc config host add temporary {$endpoint} $key \"$secret\"";
             $commands[] = "docker exec backup-of-{$this->backup->uuid} mc cp $this->backup_location temporary/$bucket{$this->backup_dir}/";
             instant_remote_process($commands, $this->server);
 
@@ -539,7 +569,7 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
     private function getFullImageName(): string
     {
         $settings = instanceSettings();
-        $helperImage = config('coolify.helper_image');
+        $helperImage = config('constants.coolify.helper_image');
         $latestVersion = $settings->helper_version;
 
         return "{$helperImage}:{$latestVersion}";

@@ -4,12 +4,14 @@ namespace App\Models;
 
 use App\Notifications\Channels\SendsEmail;
 use App\Notifications\TransactionalEmails\ResetPassword as TransactionalEmailsResetPassword;
+use App\Traits\DeletesUserSessions;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\URL;
@@ -36,7 +38,7 @@ use OpenApi\Attributes as OA;
 )]
 class User extends Authenticatable implements SendsEmail
 {
-    use HasApiTokens, HasFactory, Notifiable, TwoFactorAuthenticatable;
+    use DeletesUserSessions, HasApiTokens, HasFactory, Notifiable, TwoFactorAuthenticatable;
 
     protected $guarded = [];
 
@@ -56,6 +58,7 @@ class User extends Authenticatable implements SendsEmail
     protected static function boot()
     {
         parent::boot();
+
         static::created(function (User $user) {
             $team = [
                 'name' => $user->name."'s Team",
@@ -113,9 +116,9 @@ class User extends Authenticatable implements SendsEmail
         return $this->belongsToMany(Team::class)->withPivot('role');
     }
 
-    public function getRecepients($notification)
+    public function getRecipients(): array
     {
-        return $this->email;
+        return [$this->email];
     }
 
     public function sendVerificationEmail()
@@ -158,7 +161,7 @@ class User extends Authenticatable implements SendsEmail
 
     public function isAdminFromSession()
     {
-        if (auth()->user()->id === 0) {
+        if (Auth::id() === 0) {
             return true;
         }
         $teams = $this->teams()->get();
@@ -178,9 +181,9 @@ class User extends Authenticatable implements SendsEmail
 
     public function isInstanceAdmin()
     {
-        $found_root_team = auth()->user()->teams->filter(function ($team) {
+        $found_root_team = Auth::user()->teams->filter(function ($team) {
             if ($team->id == 0) {
-                if (! auth()->user()->isAdmin()) {
+                if (! Auth::user()->isAdmin()) {
                     return false;
                 }
 
@@ -195,9 +198,9 @@ class User extends Authenticatable implements SendsEmail
 
     public function currentTeam()
     {
-        return Cache::remember('team:'.auth()->user()->id, 3600, function () {
-            if (is_null(data_get(session('currentTeam'), 'id')) && auth()->user()->teams->count() > 0) {
-                return auth()->user()->teams[0];
+        return Cache::remember('team:'.Auth::id(), 3600, function () {
+            if (is_null(data_get(session('currentTeam'), 'id')) && Auth::user()->teams->count() > 0) {
+                return Auth::user()->teams[0];
             }
 
             return Team::find(session('currentTeam')->id);
@@ -206,7 +209,7 @@ class User extends Authenticatable implements SendsEmail
 
     public function otherTeams()
     {
-        return auth()->user()->teams->filter(function ($team) {
+        return Auth::user()->teams->filter(function ($team) {
             return $team->id != currentTeam()->id;
         });
     }
@@ -216,7 +219,7 @@ class User extends Authenticatable implements SendsEmail
         if (data_get($this, 'pivot')) {
             return $this->pivot->role;
         }
-        $user = auth()->user()->teams->where('id', currentTeam()->id)->first();
+        $user = Auth::user()->teams->where('id', currentTeam()->id)->first();
 
         return data_get($user, 'pivot.role');
     }

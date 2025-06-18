@@ -19,25 +19,22 @@ class DatabasesController extends Controller
 {
     private function removeSensitiveData($database)
     {
-        $token = auth()->user()->currentAccessToken();
         $database->makeHidden([
             'id',
             'laravel_through_key',
         ]);
-        if ($token->can('view:sensitive')) {
-            return serializeApiResponse($database);
+        if (request()->attributes->get('can_read_sensitive', false) === false) {
+            $database->makeHidden([
+                'internal_db_url',
+                'external_db_url',
+                'postgres_password',
+                'dragonfly_password',
+                'redis_password',
+                'mongo_initdb_root_password',
+                'keydb_password',
+                'clickhouse_admin_password',
+            ]);
         }
-
-        $database->makeHidden([
-            'internal_db_url',
-            'external_db_url',
-            'postgres_password',
-            'dragonfly_password',
-            'redis_password',
-            'mongo_initdb_root_password',
-            'keydb_password',
-            'clickhouse_admin_password',
-        ]);
 
         return serializeApiResponse($database);
     }
@@ -211,8 +208,9 @@ class DatabasesController extends Controller
                         'mongo_conf' => ['type' => 'string', 'description' => 'Mongo conf'],
                         'mongo_initdb_root_username' => ['type' => 'string', 'description' => 'Mongo initdb root username'],
                         'mongo_initdb_root_password' => ['type' => 'string', 'description' => 'Mongo initdb root password'],
-                        'mongo_initdb_init_database' => ['type' => 'string', 'description' => 'Mongo initdb init database'],
+                        'mongo_initdb_database' => ['type' => 'string', 'description' => 'Mongo initdb init database'],
                         'mysql_root_password' => ['type' => 'string', 'description' => 'MySQL root password'],
+                        'mysql_password' => ['type' => 'string', 'description' => 'MySQL password'],
                         'mysql_user' => ['type' => 'string', 'description' => 'MySQL user'],
                         'mysql_database' => ['type' => 'string', 'description' => 'MySQL database'],
                         'mysql_conf' => ['type' => 'string', 'description' => 'MySQL conf'],
@@ -241,7 +239,7 @@ class DatabasesController extends Controller
     )]
     public function update_by_uuid(Request $request)
     {
-        $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'postgres_user', 'postgres_password', 'postgres_db', 'postgres_initdb_args', 'postgres_host_auth_method', 'postgres_conf', 'clickhouse_admin_user', 'clickhouse_admin_password', 'dragonfly_password', 'redis_password', 'redis_conf', 'keydb_password', 'keydb_conf', 'mariadb_conf', 'mariadb_root_password', 'mariadb_user', 'mariadb_password', 'mariadb_database', 'mongo_conf', 'mongo_initdb_root_username', 'mongo_initdb_root_password', 'mongo_initdb_init_database', 'mysql_root_password', 'mysql_user', 'mysql_database', 'mysql_conf'];
+        $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'postgres_user', 'postgres_password', 'postgres_db', 'postgres_initdb_args', 'postgres_host_auth_method', 'postgres_conf', 'clickhouse_admin_user', 'clickhouse_admin_password', 'dragonfly_password', 'redis_password', 'redis_conf', 'keydb_password', 'keydb_conf', 'mariadb_conf', 'mariadb_root_password', 'mariadb_user', 'mariadb_password', 'mariadb_database', 'mongo_conf', 'mongo_initdb_root_username', 'mongo_initdb_root_password', 'mongo_initdb_database', 'mysql_root_password', 'mysql_password', 'mysql_user', 'mysql_database', 'mysql_conf'];
         $teamId = getTeamIdFromToken();
         if (is_null($teamId)) {
             return invalidTokenResponse();
@@ -413,12 +411,12 @@ class DatabasesController extends Controller
                 }
                 break;
             case 'standalone-mongodb':
-                $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'mongo_conf', 'mongo_initdb_root_username', 'mongo_initdb_root_password', 'mongo_initdb_init_database'];
+                $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'mongo_conf', 'mongo_initdb_root_username', 'mongo_initdb_root_password', 'mongo_initdb_database'];
                 $validator = customApiValidator($request->all(), [
                     'mongo_conf' => 'string',
                     'mongo_initdb_root_username' => 'string',
                     'mongo_initdb_root_password' => 'string',
-                    'mongo_initdb_init_database' => 'string',
+                    'mongo_initdb_database' => 'string',
                 ]);
                 if ($request->has('mongo_conf')) {
                     if (! isBase64Encoded($request->mongo_conf)) {
@@ -443,9 +441,10 @@ class DatabasesController extends Controller
 
                 break;
             case 'standalone-mysql':
-                $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'mysql_root_password', 'mysql_user', 'mysql_database', 'mysql_conf'];
+                $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'mysql_root_password', 'mysql_password', 'mysql_user', 'mysql_database', 'mysql_conf'];
                 $validator = customApiValidator($request->all(), [
                     'mysql_root_password' => 'string',
+                    'mysql_password' => 'string',
                     'mysql_user' => 'string',
                     'mysql_database' => 'string',
                     'mysql_conf' => 'string',
@@ -471,7 +470,6 @@ class DatabasesController extends Controller
                     $request->offsetSet('mysql_conf', $mysqlConf);
                 }
                 break;
-
         }
         $extraFields = array_diff(array_keys($request->all()), $allowedFields);
         if ($validator->fails() || ! empty($extraFields)) {
@@ -506,7 +504,6 @@ class DatabasesController extends Controller
         return response()->json([
             'message' => 'Database updated.',
         ]);
-
     }
 
     #[OA\Post(
@@ -526,11 +523,12 @@ class DatabasesController extends Controller
                 mediaType: 'application/json',
                 schema: new OA\Schema(
                     type: 'object',
-                    required: ['server_uuid', 'project_uuid', 'environment_name'],
+                    required: ['server_uuid', 'project_uuid', 'environment_name', 'environment_uuid'],
                     properties: [
                         'server_uuid' => ['type' => 'string', 'description' => 'UUID of the server'],
                         'project_uuid' => ['type' => 'string', 'description' => 'UUID of the project'],
-                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment'],
+                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment. You need to provide at least one of environment_name or environment_uuid.'],
+                        'environment_uuid' => ['type' => 'string', 'description' => 'UUID of the environment. You need to provide at least one of environment_name or environment_uuid.'],
                         'postgres_user' => ['type' => 'string', 'description' => 'PostgreSQL user'],
                         'postgres_password' => ['type' => 'string', 'description' => 'PostgreSQL password'],
                         'postgres_db' => ['type' => 'string', 'description' => 'PostgreSQL database'],
@@ -592,11 +590,12 @@ class DatabasesController extends Controller
                 mediaType: 'application/json',
                 schema: new OA\Schema(
                     type: 'object',
-                    required: ['server_uuid', 'project_uuid', 'environment_name'],
+                    required: ['server_uuid', 'project_uuid', 'environment_name', 'environment_uuid'],
                     properties: [
                         'server_uuid' => ['type' => 'string', 'description' => 'UUID of the server'],
                         'project_uuid' => ['type' => 'string', 'description' => 'UUID of the project'],
-                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment'],
+                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment. You need to provide at least one of environment_name or environment_uuid.'],
+                        'environment_uuid' => ['type' => 'string', 'description' => 'UUID of the environment. You need to provide at least one of environment_name or environment_uuid.'],
                         'destination_uuid' => ['type' => 'string',  'description' => 'UUID of the destination if the server has multiple destinations'],
                         'clickhouse_admin_user' => ['type' => 'string', 'description' => 'Clickhouse admin user'],
                         'clickhouse_admin_password' => ['type' => 'string', 'description' => 'Clickhouse admin password'],
@@ -654,11 +653,12 @@ class DatabasesController extends Controller
                 mediaType: 'application/json',
                 schema: new OA\Schema(
                     type: 'object',
-                    required: ['server_uuid', 'project_uuid', 'environment_name'],
+                    required: ['server_uuid', 'project_uuid', 'environment_name', 'environment_uuid'],
                     properties: [
                         'server_uuid' => ['type' => 'string', 'description' => 'UUID of the server'],
                         'project_uuid' => ['type' => 'string', 'description' => 'UUID of the project'],
-                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment'],
+                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment. You need to provide at least one of environment_name or environment_uuid.'],
+                        'environment_uuid' => ['type' => 'string', 'description' => 'UUID of the environment. You need to provide at least one of environment_name or environment_uuid.'],
                         'destination_uuid' => ['type' => 'string', 'description' => 'UUID of the destination if the server has multiple destinations'],
                         'dragonfly_password' => ['type' => 'string', 'description' => 'DragonFly password'],
                         'name' => ['type' => 'string', 'description' => 'Name of the database'],
@@ -715,11 +715,12 @@ class DatabasesController extends Controller
                 mediaType: 'application/json',
                 schema: new OA\Schema(
                     type: 'object',
-                    required: ['server_uuid', 'project_uuid', 'environment_name'],
+                    required: ['server_uuid', 'project_uuid', 'environment_name', 'environment_uuid'],
                     properties: [
                         'server_uuid' => ['type' => 'string', 'description' => 'UUID of the server'],
                         'project_uuid' => ['type' => 'string', 'description' => 'UUID of the project'],
-                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment'],
+                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment. You need to provide at least one of environment_name or environment_uuid.'],
+                        'environment_uuid' => ['type' => 'string', 'description' => 'UUID of the environment. You need to provide at least one of environment_name or environment_uuid.'],
                         'destination_uuid' => ['type' => 'string', 'description' => 'UUID of the destination if the server has multiple destinations'],
                         'redis_password' => ['type' => 'string', 'description' => 'Redis password'],
                         'redis_conf' => ['type' => 'string', 'description' => 'Redis conf'],
@@ -777,11 +778,12 @@ class DatabasesController extends Controller
                 mediaType: 'application/json',
                 schema: new OA\Schema(
                     type: 'object',
-                    required: ['server_uuid', 'project_uuid', 'environment_name'],
+                    required: ['server_uuid', 'project_uuid', 'environment_name', 'environment_uuid'],
                     properties: [
                         'server_uuid' => ['type' => 'string', 'description' => 'UUID of the server'],
                         'project_uuid' => ['type' => 'string', 'description' => 'UUID of the project'],
-                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment'],
+                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment. You need to provide at least one of environment_name or environment_uuid.'],
+                        'environment_uuid' => ['type' => 'string', 'description' => 'UUID of the environment. You need to provide at least one of environment_name or environment_uuid.'],
                         'destination_uuid' => ['type' => 'string', 'description' => 'UUID of the destination if the server has multiple destinations'],
                         'keydb_password' => ['type' => 'string', 'description' => 'KeyDB password'],
                         'keydb_conf' => ['type' => 'string', 'description' => 'KeyDB conf'],
@@ -839,11 +841,12 @@ class DatabasesController extends Controller
                 mediaType: 'application/json',
                 schema: new OA\Schema(
                     type: 'object',
-                    required: ['server_uuid', 'project_uuid', 'environment_name'],
+                    required: ['server_uuid', 'project_uuid', 'environment_name', 'environment_uuid'],
                     properties: [
                         'server_uuid' => ['type' => 'string', 'description' => 'UUID of the server'],
                         'project_uuid' => ['type' => 'string', 'description' => 'UUID of the project'],
-                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment'],
+                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment. You need to provide at least one of environment_name or environment_uuid.'],
+                        'environment_uuid' => ['type' => 'string', 'description' => 'UUID of the environment. You need to provide at least one of environment_name or environment_uuid.'],
                         'destination_uuid' => ['type' => 'string', 'description' => 'UUID of the destination if the server has multiple destinations'],
                         'mariadb_conf' => ['type' => 'string', 'description' => 'MariaDB conf'],
                         'mariadb_root_password' => ['type' => 'string', 'description' => 'MariaDB root password'],
@@ -904,13 +907,15 @@ class DatabasesController extends Controller
                 mediaType: 'application/json',
                 schema: new OA\Schema(
                     type: 'object',
-                    required: ['server_uuid', 'project_uuid', 'environment_name'],
+                    required: ['server_uuid', 'project_uuid', 'environment_name', 'environment_uuid'],
                     properties: [
                         'server_uuid' => ['type' => 'string', 'description' => 'UUID of the server'],
                         'project_uuid' => ['type' => 'string', 'description' => 'UUID of the project'],
-                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment'],
+                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment. You need to provide at least one of environment_name or environment_uuid.'],
+                        'environment_uuid' => ['type' => 'string', 'description' => 'UUID of the environment. You need to provide at least one of environment_name or environment_uuid.'],
                         'destination_uuid' => ['type' => 'string', 'description' => 'UUID of the destination if the server has multiple destinations'],
                         'mysql_root_password' => ['type' => 'string', 'description' => 'MySQL root password'],
+                        'mysql_password' => ['type' => 'string', 'description' => 'MySQL password'],
                         'mysql_user' => ['type' => 'string', 'description' => 'MySQL user'],
                         'mysql_database' => ['type' => 'string', 'description' => 'MySQL database'],
                         'mysql_conf' => ['type' => 'string', 'description' => 'MySQL conf'],
@@ -968,11 +973,12 @@ class DatabasesController extends Controller
                 mediaType: 'application/json',
                 schema: new OA\Schema(
                     type: 'object',
-                    required: ['server_uuid', 'project_uuid', 'environment_name'],
+                    required: ['server_uuid', 'project_uuid', 'environment_name', 'environment_uuid'],
                     properties: [
                         'server_uuid' => ['type' => 'string', 'description' => 'UUID of the server'],
                         'project_uuid' => ['type' => 'string', 'description' => 'UUID of the project'],
-                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment'],
+                        'environment_name' => ['type' => 'string', 'description' => 'Name of the environment. You need to provide at least one of environment_name or environment_uuid.'],
+                        'environment_uuid' => ['type' => 'string', 'description' => 'UUID of the environment. You need to provide at least one of environment_name or environment_uuid.'],
                         'destination_uuid' => ['type' => 'string', 'description' => 'UUID of the destination if the server has multiple destinations'],
                         'mongo_conf' => ['type' => 'string', 'description' => 'MongoDB conf'],
                         'mongo_initdb_root_username' => ['type' => 'string', 'description' => 'MongoDB initdb root username'],
@@ -1015,7 +1021,7 @@ class DatabasesController extends Controller
 
     public function create_database(Request $request, NewDatabaseTypes $type)
     {
-        $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'postgres_user', 'postgres_password', 'postgres_db', 'postgres_initdb_args', 'postgres_host_auth_method', 'postgres_conf', 'clickhouse_admin_user', 'clickhouse_admin_password', 'dragonfly_password', 'redis_password', 'redis_conf', 'keydb_password', 'keydb_conf', 'mariadb_conf', 'mariadb_root_password', 'mariadb_user', 'mariadb_password', 'mariadb_database', 'mongo_conf', 'mongo_initdb_root_username', 'mongo_initdb_root_password', 'mongo_initdb_init_database', 'mysql_root_password', 'mysql_user', 'mysql_database', 'mysql_conf'];
+        $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'environment_uuid', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'postgres_user', 'postgres_password', 'postgres_db', 'postgres_initdb_args', 'postgres_host_auth_method', 'postgres_conf', 'clickhouse_admin_user', 'clickhouse_admin_password', 'dragonfly_password', 'redis_password', 'redis_conf', 'keydb_password', 'keydb_conf', 'mariadb_conf', 'mariadb_root_password', 'mariadb_user', 'mariadb_password', 'mariadb_database', 'mongo_conf', 'mongo_initdb_root_username', 'mongo_initdb_root_password', 'mongo_initdb_database', 'mysql_root_password', 'mysql_password', 'mysql_user', 'mysql_database', 'mysql_conf'];
 
         $teamId = getTeamIdFromToken();
         if (is_null($teamId)) {
@@ -1041,6 +1047,11 @@ class DatabasesController extends Controller
                 'errors' => $errors,
             ], 422);
         }
+        $environmentUuid = $request->environment_uuid;
+        $environmentName = $request->environment_name;
+        if (blank($environmentUuid) && blank($environmentName)) {
+            return response()->json(['message' => 'You need to provide at least one of environment_name or environment_uuid.'], 422);
+        }
         $serverUuid = $request->server_uuid;
         $instantDeploy = $request->instant_deploy ?? false;
         if ($request->is_public && ! $request->public_port) {
@@ -1050,9 +1061,12 @@ class DatabasesController extends Controller
         if (! $project) {
             return response()->json(['message' => 'Project not found.'], 404);
         }
-        $environment = $project->environments()->where('name', $request->environment_name)->first();
+        $environment = $project->environments()->where('name', $environmentName)->first();
         if (! $environment) {
-            return response()->json(['message' => 'Environment not found.'], 404);
+            $environment = $project->environments()->where('uuid', $environmentUuid)->first();
+        }
+        if (! $environment) {
+            return response()->json(['message' => 'You need to provide a valid environment_name or environment_uuid.'], 422);
         }
         $server = Server::whereTeamId($teamId)->whereUuid($serverUuid)->first();
         if (! $server) {
@@ -1076,7 +1090,8 @@ class DatabasesController extends Controller
             'description' => 'string|nullable',
             'image' => 'string',
             'project_uuid' => 'string|required',
-            'environment_name' => 'string|required',
+            'environment_name' => 'string|nullable',
+            'environment_uuid' => 'string|nullable',
             'server_uuid' => 'string|required',
             'destination_uuid' => 'string',
             'is_public' => 'boolean',
@@ -1107,7 +1122,7 @@ class DatabasesController extends Controller
             }
         }
         if ($type === NewDatabaseTypes::POSTGRESQL) {
-            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'postgres_user', 'postgres_password', 'postgres_db', 'postgres_initdb_args', 'postgres_host_auth_method', 'postgres_conf'];
+            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'environment_uuid', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'postgres_user', 'postgres_password', 'postgres_db', 'postgres_initdb_args', 'postgres_host_auth_method', 'postgres_conf'];
             $validator = customApiValidator($request->all(), [
                 'postgres_user' => 'string',
                 'postgres_password' => 'string',
@@ -1165,9 +1180,8 @@ class DatabasesController extends Controller
             }
 
             return response()->json(serializeApiResponse($payload))->setStatusCode(201);
-
         } elseif ($type === NewDatabaseTypes::MARIADB) {
-            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'mariadb_conf', 'mariadb_root_password', 'mariadb_user', 'mariadb_password', 'mariadb_database'];
+            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'environment_uuid', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'mariadb_conf', 'mariadb_root_password', 'mariadb_user', 'mariadb_password', 'mariadb_database'];
             $validator = customApiValidator($request->all(), [
                 'clickhouse_admin_user' => 'string',
                 'clickhouse_admin_password' => 'string',
@@ -1223,9 +1237,10 @@ class DatabasesController extends Controller
 
             return response()->json(serializeApiResponse($payload))->setStatusCode(201);
         } elseif ($type === NewDatabaseTypes::MYSQL) {
-            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'mysql_user', 'mysql_database', 'mysql_conf'];
+            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'environment_uuid', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'mysql_root_password', 'mysql_password', 'mysql_user', 'mysql_database', 'mysql_conf'];
             $validator = customApiValidator($request->all(), [
                 'mysql_root_password' => 'string',
+                'mysql_password' => 'string',
                 'mysql_user' => 'string',
                 'mysql_database' => 'string',
                 'mysql_conf' => 'string',
@@ -1281,7 +1296,7 @@ class DatabasesController extends Controller
 
             return response()->json(serializeApiResponse($payload))->setStatusCode(201);
         } elseif ($type === NewDatabaseTypes::REDIS) {
-            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'redis_password', 'redis_conf'];
+            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'environment_uuid', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'redis_password', 'redis_conf'];
             $validator = customApiValidator($request->all(), [
                 'redis_password' => 'string',
                 'redis_conf' => 'string',
@@ -1337,7 +1352,7 @@ class DatabasesController extends Controller
 
             return response()->json(serializeApiResponse($payload))->setStatusCode(201);
         } elseif ($type === NewDatabaseTypes::DRAGONFLY) {
-            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares',  'dragonfly_password'];
+            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'environment_uuid', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares',  'dragonfly_password'];
             $validator = customApiValidator($request->all(), [
                 'dragonfly_password' => 'string',
             ]);
@@ -1367,7 +1382,7 @@ class DatabasesController extends Controller
                 'uuid' => $database->uuid,
             ]))->setStatusCode(201);
         } elseif ($type === NewDatabaseTypes::KEYDB) {
-            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'keydb_password', 'keydb_conf'];
+            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'environment_uuid', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'keydb_password', 'keydb_conf'];
             $validator = customApiValidator($request->all(), [
                 'keydb_password' => 'string',
                 'keydb_conf' => 'string',
@@ -1423,7 +1438,7 @@ class DatabasesController extends Controller
 
             return response()->json(serializeApiResponse($payload))->setStatusCode(201);
         } elseif ($type === NewDatabaseTypes::CLICKHOUSE) {
-            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares',  'clickhouse_admin_user', 'clickhouse_admin_password'];
+            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'environment_uuid', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares',  'clickhouse_admin_user', 'clickhouse_admin_password'];
             $validator = customApiValidator($request->all(), [
                 'clickhouse_admin_user' => 'string',
                 'clickhouse_admin_password' => 'string',
@@ -1459,12 +1474,12 @@ class DatabasesController extends Controller
 
             return response()->json(serializeApiResponse($payload))->setStatusCode(201);
         } elseif ($type === NewDatabaseTypes::MONGODB) {
-            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'mongo_conf', 'mongo_initdb_root_username', 'mongo_initdb_root_password', 'mongo_initdb_init_database'];
+            $allowedFields = ['name', 'description', 'image', 'public_port', 'is_public', 'project_uuid', 'environment_name', 'environment_uuid', 'server_uuid', 'destination_uuid', 'instant_deploy', 'limits_memory', 'limits_memory_swap', 'limits_memory_swappiness', 'limits_memory_reservation', 'limits_cpus', 'limits_cpuset', 'limits_cpu_shares', 'mongo_conf', 'mongo_initdb_root_username', 'mongo_initdb_root_password', 'mongo_initdb_database'];
             $validator = customApiValidator($request->all(), [
                 'mongo_conf' => 'string',
                 'mongo_initdb_root_username' => 'string',
                 'mongo_initdb_root_password' => 'string',
-                'mongo_initdb_init_database' => 'string',
+                'mongo_initdb_database' => 'string',
             ]);
             $extraFields = array_diff(array_keys($request->all()), $allowedFields);
             if ($validator->fails() || ! empty($extraFields)) {
@@ -1560,7 +1575,8 @@ class DatabasesController extends Controller
                             ]
                         )
                     ),
-                ]),
+                ]
+            ),
             new OA\Response(
                 response: 401,
                 ref: '#/components/responses/401',
@@ -1635,9 +1651,11 @@ class DatabasesController extends Controller
                             type: 'object',
                             properties: [
                                 'message' => ['type' => 'string', 'example' => 'Database starting request queued.'],
-                            ])
+                            ]
+                        )
                     ),
-                ]),
+                ]
+            ),
             new OA\Response(
                 response: 401,
                 ref: '#/components/responses/401',
@@ -1711,9 +1729,11 @@ class DatabasesController extends Controller
                             type: 'object',
                             properties: [
                                 'message' => ['type' => 'string', 'example' => 'Database stopping request queued.'],
-                            ])
+                            ]
+                        )
                     ),
-                ]),
+                ]
+            ),
             new OA\Response(
                 response: 401,
                 ref: '#/components/responses/401',
@@ -1787,9 +1807,11 @@ class DatabasesController extends Controller
                             type: 'object',
                             properties: [
                                 'message' => ['type' => 'string', 'example' => 'Database restaring request queued.'],
-                            ])
+                            ]
+                        )
                     ),
-                ]),
+                ]
+            ),
             new OA\Response(
                 response: 401,
                 ref: '#/components/responses/401',
@@ -1826,6 +1848,5 @@ class DatabasesController extends Controller
             ],
             200
         );
-
     }
 }

@@ -11,13 +11,11 @@ class SecurityController extends Controller
 {
     private function removeSensitiveData($team)
     {
-        $token = auth()->user()->currentAccessToken();
-        if ($token->can('view:sensitive')) {
-            return serializeApiResponse($team);
+        if (request()->attributes->get('can_read_sensitive', false) === false) {
+            $team->makeHidden([
+                'private_key',
+            ]);
         }
-        $team->makeHidden([
-            'private_key',
-        ]);
 
         return serializeApiResponse($team);
     }
@@ -81,15 +79,8 @@ class SecurityController extends Controller
             new OA\Response(
                 response: 200,
                 description: 'Get all private keys.',
-                content: [
-                    new OA\MediaType(
-                        mediaType: 'application/json',
-                        schema: new OA\Schema(
-                            type: 'array',
-                            items: new OA\Items(ref: '#/components/schemas/PrivateKey')
-                        )
-                    ),
-                ]),
+                content: new OA\JsonContent(ref: '#/components/schemas/PrivateKey')
+            ),
             new OA\Response(
                 response: 401,
                 ref: '#/components/responses/401',
@@ -203,6 +194,31 @@ class SecurityController extends Controller
         }
         if (! $request->description) {
             $request->offsetSet('description', 'Created by Coolify via API');
+        }
+
+        $isPrivateKeyString = str_starts_with($request->private_key, '-----BEGIN');
+        if (! $isPrivateKeyString) {
+            try {
+                $base64PrivateKey = base64_decode($request->private_key);
+                $request->offsetSet('private_key', $base64PrivateKey);
+            } catch (\Exception $e) {
+                return response()->json([
+                    'message' => 'Invalid private key.',
+                ], 422);
+            }
+        }
+        $isPrivateKeyValid = PrivateKey::validatePrivateKey($request->private_key);
+        if (! $isPrivateKeyValid) {
+            return response()->json([
+                'message' => 'Invalid private key.',
+            ], 422);
+        }
+        $fingerPrint = PrivateKey::generateFingerprint($request->private_key);
+        $isFingerPrintExists = PrivateKey::fingerprintExists($fingerPrint);
+        if ($isFingerPrintExists) {
+            return response()->json([
+                'message' => 'Private key already exists.',
+            ], 422);
         }
         $key = PrivateKey::create([
             'team_id' => $teamId,
@@ -352,6 +368,20 @@ class SecurityController extends Controller
                 response: 404,
                 description: 'Private Key not found.',
             ),
+            new OA\Response(
+                response: 422,
+                description: 'Private Key is in use and cannot be deleted.',
+                content: [
+                    new OA\MediaType(
+                        mediaType: 'application/json',
+                        schema: new OA\Schema(
+                            type: 'object',
+                            properties: [
+                                'message' => ['type' => 'string', 'example' => 'Private Key is in use and cannot be deleted.'],
+                            ]
+                        )
+                    ),
+                ]),
         ]
     )]
     public function delete_key(Request $request)
@@ -368,6 +398,14 @@ class SecurityController extends Controller
         if (is_null($key)) {
             return response()->json(['message' => 'Private Key not found.'], 404);
         }
+
+        if ($key->isInUse()) {
+            return response()->json([
+                'message' => 'Private Key is in use and cannot be deleted.',
+                'details' => 'This private key is currently being used by servers, applications, or Git integrations.',
+            ], 422);
+        }
+
         $key->forceDelete();
 
         return response()->json([

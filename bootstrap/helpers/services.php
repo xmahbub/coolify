@@ -2,6 +2,7 @@
 
 use App\Models\Application;
 use App\Models\EnvironmentVariable;
+use App\Models\Service;
 use App\Models\ServiceApplication;
 use App\Models\ServiceDatabase;
 use Illuminate\Support\Stringable;
@@ -24,7 +25,7 @@ function replaceVariables(string $variable): Stringable
 function getFilesystemVolumesFromServer(ServiceApplication|ServiceDatabase|Application $oneService, bool $isInit = false)
 {
     try {
-        if ($oneService->getMorphClass() === 'App\Models\Application') {
+        if ($oneService->getMorphClass() === \App\Models\Application::class) {
             $workdir = $oneService->workdir();
             $server = $oneService->destination->server;
         } else {
@@ -51,7 +52,7 @@ function getFilesystemVolumesFromServer(ServiceApplication|ServiceDatabase|Appli
             // Exists and is a directory
             $isDir = instant_remote_process(["test -d $fileLocation && echo OK || echo NOK"], $server);
 
-            if ($isFile == 'OK') {
+            if ($isFile === 'OK') {
                 // If its a file & exists
                 $filesystemContent = instant_remote_process(["cat $fileLocation"], $server);
                 if ($fileVolume->is_based_on_git) {
@@ -59,12 +60,12 @@ function getFilesystemVolumesFromServer(ServiceApplication|ServiceDatabase|Appli
                 }
                 $fileVolume->is_directory = false;
                 $fileVolume->save();
-            } elseif ($isDir == 'OK') {
+            } elseif ($isDir === 'OK') {
                 // If its a directory & exists
                 $fileVolume->content = null;
                 $fileVolume->is_directory = true;
                 $fileVolume->save();
-            } elseif ($isFile == 'NOK' && $isDir == 'NOK' && ! $fileVolume->is_directory && $isInit && $content) {
+            } elseif ($isFile === 'NOK' && $isDir === 'NOK' && ! $fileVolume->is_directory && $isInit && $content) {
                 // Does not exists (no dir or file), not flagged as directory, is init, has content
                 $fileVolume->content = $content;
                 $fileVolume->is_directory = false;
@@ -75,13 +76,13 @@ function getFilesystemVolumesFromServer(ServiceApplication|ServiceDatabase|Appli
                     "mkdir -p $dir",
                     "echo '$content' | base64 -d | tee $fileLocation",
                 ], $server);
-            } elseif ($isFile == 'NOK' && $isDir == 'NOK' && $fileVolume->is_directory && $isInit) {
+            } elseif ($isFile === 'NOK' && $isDir === 'NOK' && $fileVolume->is_directory && $isInit) {
                 // Does not exists (no dir or file), flagged as directory, is init
                 $fileVolume->content = null;
                 $fileVolume->is_directory = true;
                 $fileVolume->save();
                 instant_remote_process(["mkdir -p $fileLocation"], $server);
-            } elseif ($isFile == 'NOK' && $isDir == 'NOK' && ! $fileVolume->is_directory && $isInit && is_null($content)) {
+            } elseif ($isFile === 'NOK' && $isDir === 'NOK' && ! $fileVolume->is_directory && $isInit && is_null($content)) {
                 // Does not exists (no dir or file), not flagged as directory, is init, has no content => create directory
                 $fileVolume->content = null;
                 $fileVolume->is_directory = true;
@@ -119,7 +120,10 @@ function updateCompose(ServiceApplication|ServiceDatabase $resource)
             if ($resourceFqdns->count() === 1) {
                 $resourceFqdns = $resourceFqdns->first();
                 $variableName = 'SERVICE_FQDN_'.str($resource->name)->upper()->replace('-', '');
-                $generatedEnv = EnvironmentVariable::where('service_id', $resource->service_id)->where('key', $variableName)->first();
+                $generatedEnv = EnvironmentVariable::where('resourceable_type', Service::class)
+                    ->where('resourceable_id', $resource->service_id)
+                    ->where('key', $variableName)
+                    ->first();
                 $fqdn = Url::fromString($resourceFqdns);
                 $port = $fqdn->getPort();
                 $path = $fqdn->getPath();
@@ -134,7 +138,10 @@ function updateCompose(ServiceApplication|ServiceDatabase $resource)
                 }
                 if ($port) {
                     $variableName = $variableName."_$port";
-                    $generatedEnv = EnvironmentVariable::where('service_id', $resource->service_id)->where('key', $variableName)->first();
+                    $generatedEnv = EnvironmentVariable::where('resourceable_type', Service::class)
+                        ->where('resourceable_id', $resource->service_id)
+                        ->where('key', $variableName)
+                        ->first();
                     if ($generatedEnv) {
                         if ($path === '/') {
                             $generatedEnv->value = $fqdn;
@@ -145,7 +152,10 @@ function updateCompose(ServiceApplication|ServiceDatabase $resource)
                     }
                 }
                 $variableName = 'SERVICE_URL_'.str($resource->name)->upper()->replace('-', '');
-                $generatedEnv = EnvironmentVariable::where('service_id', $resource->service_id)->where('key', $variableName)->first();
+                $generatedEnv = EnvironmentVariable::where('resourceable_type', Service::class)
+                    ->where('resourceable_id', $resource->service_id)
+                    ->where('key', $variableName)
+                    ->first();
                 $url = Url::fromString($fqdn);
                 $port = $url->getPort();
                 $path = $url->getPath();
@@ -161,7 +171,10 @@ function updateCompose(ServiceApplication|ServiceDatabase $resource)
                 }
                 if ($port) {
                     $variableName = $variableName."_$port";
-                    $generatedEnv = EnvironmentVariable::where('service_id', $resource->service_id)->where('key', $variableName)->first();
+                    $generatedEnv = EnvironmentVariable::where('resourceable_type', Service::class)
+                        ->where('resourceable_id', $resource->service_id)
+                        ->where('key', $variableName)
+                        ->first();
                     if ($generatedEnv) {
                         if ($path === '/') {
                             $generatedEnv->value = $url;
@@ -179,10 +192,16 @@ function updateCompose(ServiceApplication|ServiceDatabase $resource)
                     $path = $host->getPath();
                     $host = $host->getScheme().'://'.$host->getHost();
                     if ($port) {
-                        $port_envs = EnvironmentVariable::where('service_id', $resource->service_id)->where('key', 'like', "SERVICE_FQDN_%_$port")->get();
+                        $port_envs = EnvironmentVariable::where('resourceable_type', Service::class)
+                            ->where('resourceable_id', $resource->service_id)
+                            ->where('key', 'like', "SERVICE_FQDN_%_$port")
+                            ->get();
                         foreach ($port_envs as $port_env) {
                             $service_fqdn = str($port_env->key)->beforeLast('_')->after('SERVICE_FQDN_');
-                            $env = EnvironmentVariable::where('service_id', $resource->service_id)->where('key', 'SERVICE_FQDN_'.$service_fqdn)->first();
+                            $env = EnvironmentVariable::where('resourceable_type', Service::class)
+                                ->where('resourceable_id', $resource->service_id)
+                                ->where('key', 'SERVICE_FQDN_'.$service_fqdn)
+                                ->first();
                             if ($env) {
                                 if ($path === '/') {
                                     $env->value = $host;
@@ -198,10 +217,16 @@ function updateCompose(ServiceApplication|ServiceDatabase $resource)
                             }
                             $port_env->save();
                         }
-                        $port_envs_url = EnvironmentVariable::where('service_id', $resource->service_id)->where('key', 'like', "SERVICE_URL_%_$port")->get();
+                        $port_envs_url = EnvironmentVariable::where('resourceable_type', Service::class)
+                            ->where('resourceable_id', $resource->service_id)
+                            ->where('key', 'like', "SERVICE_URL_%_$port")
+                            ->get();
                         foreach ($port_envs_url as $port_env_url) {
                             $service_url = str($port_env_url->key)->beforeLast('_')->after('SERVICE_URL_');
-                            $env = EnvironmentVariable::where('service_id', $resource->service_id)->where('key', 'SERVICE_URL_'.$service_url)->first();
+                            $env = EnvironmentVariable::where('resourceable_type', Service::class)
+                                ->where('resourceable_id', $resource->service_id)
+                                ->where('key', 'SERVICE_URL_'.$service_url)
+                                ->first();
                             if ($env) {
                                 if ($path === '/') {
                                     $env->value = $url;
@@ -219,7 +244,10 @@ function updateCompose(ServiceApplication|ServiceDatabase $resource)
                         }
                     } else {
                         $variableName = 'SERVICE_FQDN_'.str($resource->name)->upper()->replace('-', '');
-                        $generatedEnv = EnvironmentVariable::where('service_id', $resource->service_id)->where('key', $variableName)->first();
+                        $generatedEnv = EnvironmentVariable::where('resourceable_type', Service::class)
+                            ->where('resourceable_id', $resource->service_id)
+                            ->where('key', $variableName)
+                            ->first();
                         $fqdn = Url::fromString($fqdn);
                         $fqdn = $fqdn->getScheme().'://'.$fqdn->getHost().$fqdn->getPath();
                         if ($generatedEnv) {
@@ -227,7 +255,10 @@ function updateCompose(ServiceApplication|ServiceDatabase $resource)
                             $generatedEnv->save();
                         }
                         $variableName = 'SERVICE_URL_'.str($resource->name)->upper()->replace('-', '');
-                        $generatedEnv = EnvironmentVariable::where('service_id', $resource->service_id)->where('key', $variableName)->first();
+                        $generatedEnv = EnvironmentVariable::where('resourceable_type', Service::class)
+                            ->where('resourceable_id', $resource->service_id)
+                            ->where('key', $variableName)
+                            ->first();
                         $url = Url::fromString($fqdn);
                         $url = $url->getHost().$url->getPath();
                         if ($generatedEnv) {
@@ -245,8 +276,5 @@ function updateCompose(ServiceApplication|ServiceDatabase $resource)
 }
 function serviceKeys()
 {
-    $services = get_service_templates();
-    $serviceKeys = $services->keys();
-
-    return $serviceKeys;
+    return get_service_templates()->keys();
 }

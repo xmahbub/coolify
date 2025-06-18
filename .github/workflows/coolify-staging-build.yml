@@ -2,7 +2,10 @@ name: Staging Build
 
 on:
   push:
-    branches-ignore: ["main", "v3"]
+    branches-ignore:
+      - v4.x
+      - v3.x
+      - '**v5.x**'
     paths-ignore:
         - .github/workflows/coolify-helper.yml
         - .github/workflows/coolify-helper-next.yml
@@ -11,7 +14,8 @@ on:
         - docker/coolify-helper/Dockerfile
         - docker/coolify-realtime/Dockerfile
         - docker/testing-host/Dockerfile
-        - templates/service-templates.json
+        - templates/**
+        - CHANGELOG.md
 
 env:
   GITHUB_REGISTRY: ghcr.io
@@ -42,14 +46,12 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/prod/Dockerfile
+          file: docker/production/Dockerfile
           platforms: linux/amd64
           push: true
           tags: |
             ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
             ${{ env.GITHUB_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-          labels: |
-            coolify.managed=true
 
   aarch64:
     runs-on: [self-hosted, arm64]
@@ -77,14 +79,12 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/prod/Dockerfile
+          file: docker/production/Dockerfile
           platforms: linux/aarch64
           push: true
           tags: |
             ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}-aarch64
             ${{ env.GITHUB_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}-aarch64
-          labels: |
-            coolify.managed=true
 
   merge-manifest:
     runs-on: ubuntu-latest

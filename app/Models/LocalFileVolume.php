@@ -3,13 +3,23 @@
 namespace App\Models;
 
 use App\Events\FileStorageChanged;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class LocalFileVolume extends BaseModel
 {
+    protected $casts = [
+        // 'fs_path' => 'encrypted',
+        // 'mount_path' => 'encrypted',
+        'content' => 'encrypted',
+        'is_directory' => 'boolean',
+    ];
+
     use HasFactory;
 
     protected $guarded = [];
+
+    public $appends = ['is_binary'];
 
     protected static function booted()
     {
@@ -17,6 +27,15 @@ class LocalFileVolume extends BaseModel
             $fileVolume->load(['service']);
             dispatch(new \App\Jobs\ServerStorageSaveJob($fileVolume));
         });
+    }
+
+    protected function isBinary(): Attribute
+    {
+        return Attribute::make(
+            get: function () {
+                return $this->content === '[binary file]';
+            }
+        );
     }
 
     public function service()
@@ -44,6 +63,10 @@ class LocalFileVolume extends BaseModel
         $isFile = instant_remote_process(["test -f $path && echo OK || echo NOK"], $server);
         if ($isFile === 'OK') {
             $content = instant_remote_process(["cat $path"], $server, false);
+            // Check if content contains binary data by looking for null bytes or non-printable characters
+            if (str_contains($content, "\0") || preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $content)) {
+                $content = '[binary file]';
+            }
             $this->content = $content;
             $this->is_directory = false;
             $this->save();
@@ -72,7 +95,6 @@ class LocalFileVolume extends BaseModel
         if ($path && $path != '/' && $path != '.' && $path != '..') {
             if ($isFile === 'OK') {
                 $commands->push("rm -rf $path > /dev/null 2>&1 || true");
-
             } elseif ($isDir === 'OK') {
                 $commands->push("rm -rf $path > /dev/null 2>&1 || true");
                 $commands->push("rmdir $path > /dev/null 2>&1 || true");
@@ -113,15 +135,15 @@ class LocalFileVolume extends BaseModel
         }
         $isFile = instant_remote_process(["test -f $path && echo OK || echo NOK"], $server);
         $isDir = instant_remote_process(["test -d $path && echo OK || echo NOK"], $server);
-        if ($isFile == 'OK' && $this->is_directory) {
+        if ($isFile === 'OK' && $this->is_directory) {
             $content = instant_remote_process(["cat $path"], $server, false);
             $this->is_directory = false;
             $this->content = $content;
             $this->save();
             FileStorageChanged::dispatch(data_get($server, 'team_id'));
             throw new \Exception('The following file is a file on the server, but you are trying to mark it as a directory. Please delete the file on the server or mark it as directory.');
-        } elseif ($isDir == 'OK' && ! $this->is_directory) {
-            if ($path == '/' || $path == '.' || $path == '..' || $path == '' || str($path)->isEmpty() || is_null($path)) {
+        } elseif ($isDir === 'OK' && ! $this->is_directory) {
+            if ($path === '/' || $path === '.' || $path === '..' || $path === '' || str($path)->isEmpty() || is_null($path)) {
                 $this->is_directory = true;
                 $this->save();
                 throw new \Exception('The following file is a directory on the server, but you are trying to mark it as a file. <br><br>Please delete the directory on the server or mark it as directory.');
@@ -132,7 +154,7 @@ class LocalFileVolume extends BaseModel
             ], $server, false);
             FileStorageChanged::dispatch(data_get($server, 'team_id'));
         }
-        if ($isDir == 'NOK' && ! $this->is_directory) {
+        if ($isDir === 'NOK' && ! $this->is_directory) {
             $chmod = data_get($this, 'chmod');
             $chown = data_get($this, 'chown');
             if ($content) {
@@ -148,10 +170,25 @@ class LocalFileVolume extends BaseModel
             if ($chmod) {
                 $commands->push("chmod $chmod $path");
             }
-        } elseif ($isDir == 'NOK' && $this->is_directory) {
+        } elseif ($isDir === 'NOK' && $this->is_directory) {
             $commands->push("mkdir -p $path > /dev/null 2>&1 || true");
         }
 
         return instant_remote_process($commands, $server);
+    }
+
+    // Accessor for convenient access
+    protected function plainMountPath(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => $this->mount_path,
+            set: fn ($value) => $this->mount_path = $value
+        );
+    }
+
+    // Scope for searching
+    public function scopeWherePlainMountPath($query, $path)
+    {
+        return $query->get()->where('plain_mount_path', $path);
     }
 }

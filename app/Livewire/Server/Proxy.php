@@ -4,7 +4,6 @@ namespace App\Livewire\Server;
 
 use App\Actions\Proxy\CheckConfiguration;
 use App\Actions\Proxy\SaveConfiguration;
-use App\Actions\Proxy\StartProxy;
 use App\Models\Server;
 use Livewire\Component;
 
@@ -16,9 +15,11 @@ class Proxy extends Component
 
     public $proxy_settings = null;
 
+    public bool $redirect_enabled = true;
+
     public ?string $redirect_url = null;
 
-    protected $listeners = ['proxyStatusUpdated', 'saveConfiguration' => 'submit'];
+    protected $listeners = ['saveConfiguration' => 'submit'];
 
     protected $rules = [
         'server.settings.generate_exact_labels' => 'required|boolean',
@@ -27,31 +28,33 @@ class Proxy extends Component
     public function mount()
     {
         $this->selectedProxy = $this->server->proxyType();
+        $this->redirect_enabled = data_get($this->server, 'proxy.redirect_enabled', true);
         $this->redirect_url = data_get($this->server, 'proxy.redirect_url');
     }
 
-    public function proxyStatusUpdated()
-    {
-        $this->dispatch('refresh')->self();
-    }
+    // public function proxyStatusUpdated()
+    // {
+    //     $this->dispatch('refresh')->self();
+    // }
 
     public function changeProxy()
     {
         $this->server->proxy = null;
         $this->server->save();
-        $this->dispatch('proxyChanged');
+
+        $this->dispatch('reloadWindow');
     }
 
     public function selectProxy($proxy_type)
     {
-        $this->server->proxy->set('status', 'exited');
-        $this->server->proxy->set('type', $proxy_type);
-        $this->server->save();
-        $this->selectedProxy = $this->server->proxy->type;
-        if ($this->server->proxySet()) {
-            StartProxy::run($this->server, false);
+        try {
+            $this->server->changeProxy($proxy_type, async: false);
+            $this->selectedProxy = $this->server->proxy->type;
+
+            $this->dispatch('reloadWindow');
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
         }
-        $this->dispatch('proxyStatusUpdated');
     }
 
     public function instantSave()
@@ -65,13 +68,25 @@ class Proxy extends Component
         }
     }
 
+    public function instantSaveRedirect()
+    {
+        try {
+            $this->server->proxy->redirect_enabled = $this->redirect_enabled;
+            $this->server->save();
+            $this->server->setupDefaultRedirect();
+            $this->dispatch('success', 'Proxy configuration saved.');
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
     public function submit()
     {
         try {
             SaveConfiguration::run($this->server, $this->proxy_settings);
             $this->server->proxy->redirect_url = $this->redirect_url;
             $this->server->save();
-            $this->server->setupDefault404Redirect();
+            $this->server->setupDefaultRedirect();
             $this->dispatch('success', 'Proxy configuration saved.');
         } catch (\Throwable $e) {
             return handleError($e, $this);
@@ -94,12 +109,6 @@ class Proxy extends Component
     {
         try {
             $this->proxy_settings = CheckConfiguration::run($this->server);
-            if (str($this->proxy_settings)->contains('--api.dashboard=true') && str($this->proxy_settings)->contains('--api.insecure=true')) {
-                $this->dispatch('traefikDashboardAvailable', true);
-            } else {
-                $this->dispatch('traefikDashboardAvailable', false);
-            }
-
         } catch (\Throwable $e) {
             return handleError($e, $this);
         }

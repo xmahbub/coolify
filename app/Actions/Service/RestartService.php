@@ -9,10 +9,12 @@ class RestartService
 {
     use AsAction;
 
-    public function handle(Service $service)
+    public string $jobQueue = 'high';
+
+    public function handle(Service $service, bool $pullLatestImages)
     {
         StopService::run($service);
 
-        return StartService::run($service);
+        return StartService::run($service, $pullLatestImages);
     }
 }

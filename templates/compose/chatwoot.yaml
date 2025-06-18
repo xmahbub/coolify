@@ -80,7 +80,7 @@ services:
       - ACTIVE_STORAGE_SERVICE=${ACTIVE_STORAGE_SERVICE:-local}
     command: ['bundle', 'exec', 'sidekiq', '-C', 'config/sidekiq.yml']
     volumes:
-      - sidekiq-data:/app/storage
+      - rails-data:/app/storage
     healthcheck:
       test: ["CMD-SHELL", "bundle exec rails runner 'puts Sidekiq.redis(&:info)' > /dev/null 2>&1"]
       interval: 30s
@@ -88,7 +88,7 @@ services:
       retries: 3
 
   postgres:
-    image: postgres:12
+    image: pgvector/pgvector:pg12
     restart: always
     volumes:
       - postgres-data:/var/lib/postgresql/data

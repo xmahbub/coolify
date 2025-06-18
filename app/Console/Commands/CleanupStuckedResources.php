@@ -30,18 +30,20 @@ class CleanupStuckedResources extends Command
 
     public function handle()
     {
-        ray('Running cleanup stucked resources.');
-        echo "Running cleanup stucked resources.\n";
         $this->cleanup_stucked_resources();
     }
 
     private function cleanup_stucked_resources()
     {
-
         try {
             $servers = Server::all()->filter(function ($server) {
                 return $server->isFunctional();
             });
+            if (isCloud()) {
+                $servers = $servers->filter(function ($server) {
+                    return data_get($server->team->subscription, 'stripe_invoice_paid', false) === true;
+                });
+            }
             foreach ($servers as $server) {
                 CleanupHelperContainersJob::dispatch($server);
             }

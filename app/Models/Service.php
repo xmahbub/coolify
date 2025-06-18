@@ -6,9 +6,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Process\InvokedProcess;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use OpenApi\Attributes as OA;
 use Spatie\Url\Url;
@@ -46,10 +44,15 @@ class Service extends BaseModel
 
     protected $guarded = [];
 
-    protected $appends = ['server_status'];
+    protected $appends = ['server_status', 'status'];
 
     protected static function booted()
     {
+        static::creating(function ($service) {
+            if (blank($service->name)) {
+                $service->name = 'service-'.(new Cuid2);
+            }
+        });
         static::created(function ($service) {
             $service->compose_parsing_version = self::$parserVersion;
             $service->save();
@@ -105,12 +108,12 @@ class Service extends BaseModel
 
     public function isRunning()
     {
-        return (bool) str($this->status())->contains('running');
+        return (bool) str($this->status)->contains('running');
     }
 
     public function isExited()
     {
-        return (bool) str($this->status())->contains('exited');
+        return (bool) str($this->status)->contains('exited');
     }
 
     public function type()
@@ -133,66 +136,12 @@ class Service extends BaseModel
         return $this->morphToMany(Tag::class, 'taggable');
     }
 
-    public function getContainersToStop(): array
+    public static function ownedByCurrentTeam()
     {
-        $containersToStop = [];
-        $applications = $this->applications()->get();
-        foreach ($applications as $application) {
-            $containersToStop[] = "{$application->name}-{$this->uuid}";
-        }
-        $dbs = $this->databases()->get();
-        foreach ($dbs as $db) {
-            $containersToStop[] = "{$db->name}-{$this->uuid}";
-        }
-
-        return $containersToStop;
+        return Service::whereRelation('environment.project.team', 'id', currentTeam()->id)->orderBy('name');
     }
 
-    public function stopContainers(array $containerNames, $server, int $timeout = 300)
-    {
-        $processes = [];
-        foreach ($containerNames as $containerName) {
-            $processes[$containerName] = $this->stopContainer($containerName, $timeout);
-        }
-
-        $startTime = time();
-        while (count($processes) > 0) {
-            $finishedProcesses = array_filter($processes, function ($process) {
-                return ! $process->running();
-            });
-            foreach (array_keys($finishedProcesses) as $containerName) {
-                unset($processes[$containerName]);
-                $this->removeContainer($containerName, $server);
-            }
-
-            if (time() - $startTime >= $timeout) {
-                $this->forceStopRemainingContainers(array_keys($processes), $server);
-                break;
-            }
-
-            usleep(100000);
-        }
-    }
-
-    public function stopContainer(string $containerName, int $timeout): InvokedProcess
-    {
-        return Process::timeout($timeout)->start("docker stop --time=$timeout $containerName");
-    }
-
-    public function removeContainer(string $containerName, $server)
-    {
-        instant_remote_process(command: ["docker rm -f $containerName"], server: $server, throwError: false);
-    }
-
-    public function forceStopRemainingContainers(array $containerNames, $server)
-    {
-        foreach ($containerNames as $containerName) {
-            instant_remote_process(command: ["docker kill $containerName"], server: $server, throwError: false);
-            $this->removeContainer($containerName, $server);
-        }
-    }
-
-    public function delete_configurations()
+    public function deleteConfigurations()
     {
         $server = data_get($this, 'destination.server');
         $workdir = $this->workdir();
@@ -201,14 +150,14 @@ class Service extends BaseModel
         }
     }
 
-    public function delete_connected_networks($uuid)
+    public function deleteConnectedNetworks()
     {
         $server = data_get($this, 'destination.server');
-        instant_remote_process(["docker network disconnect {$uuid} coolify-proxy"], $server, false);
-        instant_remote_process(["docker network rm {$uuid}"], $server, false);
+        instant_remote_process(["docker network disconnect {$this->uuid} coolify-proxy"], $server, false);
+        instant_remote_process(["docker network rm {$this->uuid}"], $server, false);
     }
 
-    public function status()
+    public function getStatusAttribute()
     {
         $applications = $this->applications;
         $databases = $this->databases;
@@ -366,7 +315,6 @@ class Service extends BaseModel
                         ]);
                     }
                     $password = $this->environment_variables()->where('key', 'SERVICE_PASSWORD_LANGFUSE')->first();
-                    ray('password', $password);
                     if ($password) {
                         $data = $data->merge([
                             'Admin Password' => [
@@ -1046,10 +994,11 @@ class Service extends BaseModel
                     $fields->put('MySQL', $data->toArray());
                     break;
                 case $image->contains('mariadb'):
-                    $userVariables = ['SERVICE_USER_MARIADB', 'SERVICE_USER_WORDPRESS', '_APP_DB_USER', 'SERVICE_USER_MYSQL', 'MYSQL_USER'];
+                    $userVariables = ['SERVICE_USER_MARIADB', 'SERVICE_USER_WORDPRESS', 'SERVICE_USER_MYSQL', 'MYSQL_USER'];
                     $passwordVariables = ['SERVICE_PASSWORD_MARIADB', 'SERVICE_PASSWORD_WORDPRESS', '_APP_DB_PASS', 'MYSQL_PASSWORD'];
                     $rootPasswordVariables = ['SERVICE_PASSWORD_MARIADBROOT', 'SERVICE_PASSWORD_ROOT', '_APP_DB_ROOT_PASS', 'MYSQL_ROOT_PASSWORD'];
                     $dbNameVariables = ['SERVICE_DATABASE_MARIADB', 'SERVICE_DATABASE_WORDPRESS', '_APP_DB_SCHEMA', 'MYSQL_DATABASE'];
+
                     $mariadb_user = $this->environment_variables()->whereIn('key', $userVariables)->first();
                     $mariadb_password = $this->environment_variables()->whereIn('key', $passwordVariables)->first();
                     $mariadb_root_password = $this->environment_variables()->whereIn('key', $rootPasswordVariables)->first();
@@ -1096,9 +1045,25 @@ class Service extends BaseModel
                     }
                     $fields->put('MariaDB', $data->toArray());
                     break;
-
             }
         }
+        $fields = collect($fields)->map(function ($extraFields) {
+            if (is_array($extraFields)) {
+                $extraFields = collect($extraFields)->map(function ($field) {
+                    if (filled($field['value']) && str($field['value'])->startsWith('$SERVICE_')) {
+                        $searchValue = str($field['value'])->after('$')->value;
+                        $newValue = $this->environment_variables()->where('key', $searchValue)->first();
+                        if ($newValue) {
+                            $field['value'] = $newValue->value;
+                        }
+                    }
+
+                    return $field;
+                });
+            }
+
+            return $extraFields;
+        });
 
         return $fields;
     }
@@ -1108,7 +1073,6 @@ class Service extends BaseModel
         foreach ($fields as $field) {
             $key = data_get($field, 'key');
             $value = data_get($field, 'value');
-            ray($key, $value);
             $found = $this->environment_variables()->where('key', $key)->first();
             if ($found) {
                 $found->value = $value;
@@ -1118,7 +1082,8 @@ class Service extends BaseModel
                     'key' => $key,
                     'value' => $value,
                     'is_build_time' => false,
-                    'service_id' => $this->id,
+                    'resourceable_id' => $this->id,
+                    'resourceable_type' => $this->getMorphClass(),
                     'is_preview' => false,
                 ]);
             }
@@ -1130,7 +1095,7 @@ class Service extends BaseModel
         if (data_get($this, 'environment.project.uuid')) {
             return route('project.service.configuration', [
                 'project_uuid' => data_get($this, 'environment.project.uuid'),
-                'environment_name' => data_get($this, 'environment.name'),
+                'environment_uuid' => data_get($this, 'environment.uuid'),
                 'service_uuid' => data_get($this, 'uuid'),
             ]);
         }
@@ -1138,12 +1103,12 @@ class Service extends BaseModel
         return null;
     }
 
-    public function failedTaskLink($task_uuid)
+    public function taskLink($task_uuid)
     {
         if (data_get($this, 'environment.project.uuid')) {
             $route = route('project.service.scheduled-tasks', [
                 'project_uuid' => data_get($this, 'environment.project.uuid'),
-                'environment_name' => data_get($this, 'environment.name'),
+                'environment_uuid' => data_get($this, 'environment.uuid'),
                 'service_uuid' => data_get($this, 'uuid'),
                 'task_uuid' => $task_uuid,
             ]);
@@ -1169,7 +1134,7 @@ class Service extends BaseModel
         $services = get_service_templates();
         $service = data_get($services, str($this->name)->beforeLast('-')->value, []);
 
-        return data_get($service, 'documentation', config('constants.docs.base_url'));
+        return data_get($service, 'documentation', config('constants.urls.docs'));
     }
 
     public function applications()
@@ -1230,14 +1195,17 @@ class Service extends BaseModel
         return $this->hasMany(ScheduledTask::class)->orderBy('name', 'asc');
     }
 
-    public function environment_variables(): HasMany
+    public function environment_variables()
     {
-        return $this->hasMany(EnvironmentVariable::class)->orderByRaw("LOWER(key) LIKE LOWER('SERVICE%') DESC, LOWER(key) ASC");
+        return $this->morphMany(EnvironmentVariable::class, 'resourceable')
+            ->orderBy('key', 'asc');
     }
 
-    public function environment_variables_preview(): HasMany
+    public function environment_variables_preview()
     {
-        return $this->hasMany(EnvironmentVariable::class)->where('is_preview', true)->orderByRaw("LOWER(key) LIKE LOWER('SERVICE%') DESC, LOWER(key) ASC");
+        return $this->morphMany(EnvironmentVariable::class, 'resourceable')
+            ->where('is_preview', true)
+            ->orderByRaw("LOWER(key) LIKE LOWER('SERVICE%') DESC, LOWER(key) ASC");
     }
 
     public function workdir()
@@ -1306,14 +1274,11 @@ class Service extends BaseModel
         } else {
             return collect([]);
         }
-
     }
 
     public function networks()
     {
-        $networks = getTopLevelNetworks($this);
-
-        return $networks;
+        return getTopLevelNetworks($this);
     }
 
     protected function isDeployable(): Attribute

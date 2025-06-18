@@ -11,16 +11,22 @@
 
         let checkNumber = 1;
         let checkPusherInterval = null;
+        let checkReconnectInterval = null;
+
         if (!this.popups.realtime) {
             checkPusherInterval = setInterval(() => {
-                if (window.Echo && window.Echo.connector.pusher.connection.state !== 'connected') {
-                    checkNumber++;
-                    if (checkNumber > 5) {
-                        this.popups.realtime = true;
-                        console.error(
-                            'Coolify could not connect to its real-time service. This will cause unusual problems on the UI if not fixed! Please check the related documentation (https://coolify.io/docs/knowledge-base/cloudflare/tunnels) or get help on Discord (https://coollabs.io/discord).)'
-                        );
-                        clearInterval(checkPusherInterval);
+                if (window.Echo) {
+                    if (window.Echo.connector.pusher.connection.state === 'connected') {
+                        this.popups.realtime = false;
+                    } else {
+                        checkNumber++;
+                        if (checkNumber > 5) {
+                            this.popups.realtime = true;
+                            console.error(
+                                'Coolify could not connect to its real-time service. This will cause unusual problems on the UI if not fixed! Please check the related documentation (https://coolify.io/docs/knowledge-base/cloudflare/tunnels/overview) or get help on Discord (https://coollabs.io/discord).)'
+                            );
+                        }
+
                     }
                 }
             }, 2000);
@@ -73,6 +79,16 @@
             </x-slot:button-text>
         </x-popup>
     </span>
+    @if (currentTeam()->subscriptionPastOverDue())
+        <x-banner :closable=false>
+            <div><span class="font-bold text-red-500">WARNING:</span> Your subscription is in over-due. If your latest
+                payment is not paid within a week, all automations <span class="font-bold text-red-500">will
+                    be deactivated</span>. Visit <a href="{{ route('subscription.show') }}"
+                    class="underline dark:text-white">/subscription</a> to check your subscription status or pay your
+                invoice (or check your email for the invoice).
+            </div>
+        </x-banner>
+    @endif
     @if (currentTeam()->serverOverflow())
         <x-banner :closable=false>
             <div><span class="font-bold text-red-500">WARNING:</span> The number of active servers exceeds the limit

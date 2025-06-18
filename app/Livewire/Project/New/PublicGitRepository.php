@@ -99,7 +99,6 @@ class PublicGitRepository extends Component
                 $this->base_directory = '/'.$this->base_directory;
             }
         }
-
     }
 
     public function updatedDockerComposeLocation()
@@ -174,7 +173,7 @@ class PublicGitRepository extends Component
 
                 return;
             }
-            if (! $this->branchFound && $this->git_branch == 'main') {
+            if (! $this->branchFound && $this->git_branch === 'main') {
                 try {
                     $this->git_branch = 'master';
                     $this->getBranch();
@@ -189,15 +188,26 @@ class PublicGitRepository extends Component
 
     private function getGitSource()
     {
+        $this->git_branch = 'main';
+        $this->base_directory = '/';
+
         $this->repository_url_parsed = Url::fromString($this->repository_url);
         $this->git_host = $this->repository_url_parsed->getHost();
         $this->git_repository = $this->repository_url_parsed->getSegment(1).'/'.$this->repository_url_parsed->getSegment(2);
+
         if ($this->repository_url_parsed->getSegment(3) === 'tree') {
-            $this->git_branch = str($this->repository_url_parsed->getPath())->after('tree/')->value();
+            $path = str($this->repository_url_parsed->getPath())->trim('/');
+            $this->git_branch = str($path)->after('tree/')->before('/')->value();
+            $this->base_directory = str($path)->after($this->git_branch)->after('/')->value();
+            if (filled($this->base_directory)) {
+                $this->base_directory = '/'.$this->base_directory;
+            } else {
+                $this->base_directory = '/';
+            }
         } else {
             $this->git_branch = 'main';
         }
-        if ($this->git_host == 'github.com') {
+        if ($this->git_host === 'github.com') {
             $this->git_source = GithubApp::where('name', 'Public GitHub')->first();
 
             return;
@@ -213,7 +223,7 @@ class PublicGitRepository extends Component
 
             return;
         }
-        if ($this->git_source->getMorphClass() === 'App\Models\GithubApp') {
+        if ($this->git_source->getMorphClass() === \App\Models\GithubApp::class) {
             ['rate_limit_remaining' => $this->rate_limit_remaining, 'rate_limit_reset' => $this->rate_limit_reset] = githubApi(source: $this->git_source, endpoint: "/repos/{$this->git_repository}/branches/{$this->git_branch}");
             $this->rate_limit_reset = Carbon::parse((int) $this->rate_limit_reset)->format('Y-M-d H:i:s');
             $this->branchFound = true;
@@ -226,7 +236,7 @@ class PublicGitRepository extends Component
             $this->validate();
             $destination_uuid = $this->query['destination'];
             $project_uuid = $this->parameters['project_uuid'];
-            $environment_name = $this->parameters['environment_name'];
+            $environment_uuid = $this->parameters['environment_uuid'];
 
             $destination = StandaloneDocker::where('uuid', $destination_uuid)->first();
             if (! $destination) {
@@ -238,7 +248,7 @@ class PublicGitRepository extends Component
             $destination_class = $destination->getMorphClass();
 
             $project = Project::where('uuid', $project_uuid)->first();
-            $environment = $project->load(['environments'])->environments->where('name', $environment_name)->first();
+            $environment = $project->load(['environments'])->environments->where('uuid', $environment_uuid)->first();
 
             if ($this->build_pack === 'dockercompose' && isDev() && $this->new_compose_services) {
                 $server = $destination->server;
@@ -261,7 +271,7 @@ class PublicGitRepository extends Component
 
                 return redirect()->route('project.service.configuration', [
                     'service_uuid' => $service->uuid,
-                    'environment_name' => $environment->name,
+                    'environment_uuid' => $environment->uuid,
                     'project_uuid' => $project->uuid,
                 ]);
 
@@ -320,7 +330,7 @@ class PublicGitRepository extends Component
 
             return redirect()->route('project.application.configuration', [
                 'application_uuid' => $application->uuid,
-                'environment_name' => $environment->name,
+                'environment_uuid' => $environment->uuid,
                 'project_uuid' => $project->uuid,
             ]);
         } catch (\Throwable $e) {

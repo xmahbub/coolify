@@ -18,7 +18,7 @@ class Index extends Component
 
     public int $skip = 0;
 
-    public int $default_take = 40;
+    public int $default_take = 10;
 
     public bool $show_next = false;
 
@@ -28,13 +28,22 @@ class Index extends Component
 
     protected $queryString = ['pull_request_id'];
 
+    public function getListeners()
+    {
+        $teamId = auth()->user()->currentTeam()->id;
+
+        return [
+            "echo-private:team.{$teamId},ServiceChecked" => '$refresh',
+        ];
+    }
+
     public function mount()
     {
         $project = currentTeam()->load(['projects'])->projects->where('uuid', request()->route('project_uuid'))->first();
         if (! $project) {
             return redirect()->route('dashboard');
         }
-        $environment = $project->load(['environments'])->environments->where('name', request()->route('environment_name'))->first()->load(['applications']);
+        $environment = $project->load(['environments'])->environments->where('uuid', request()->route('environment_uuid'))->first()->load(['applications']);
         if (! $environment) {
             return redirect()->route('dashboard');
         }
@@ -42,7 +51,7 @@ class Index extends Component
         if (! $application) {
             return redirect()->route('dashboard');
         }
-        ['deployments' => $deployments, 'count' => $count] = $application->deployments(0, 40);
+        ['deployments' => $deployments, 'count' => $count] = $application->deployments(0, $this->default_take);
         $this->application = $application;
         $this->deployments = $deployments;
         $this->deployments_count = $count;

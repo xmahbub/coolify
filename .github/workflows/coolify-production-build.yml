@@ -2,7 +2,7 @@ name: Production Build (v4)
 
 on:
   push:
-    branches: ["main"]
+    branches: ["v4.x"]
     paths-ignore:
       - .github/workflows/coolify-helper.yml
       - .github/workflows/coolify-helper-next.yml
@@ -11,7 +11,8 @@ on:
       - docker/coolify-helper/Dockerfile
       - docker/coolify-realtime/Dockerfile
       - docker/testing-host/Dockerfile
-      - templates/service-templates.json
+      - templates/**
+      - CHANGELOG.md
 
 env:
   GITHUB_REGISTRY: ghcr.io
@@ -41,20 +42,18 @@ jobs:
       - name: Get Version
         id: version
         run: |
-          echo "VERSION=$(docker run --rm -v "$(pwd):/app" -w /app php:8.2-alpine3.16 php bootstrap/getVersion.php)"|xargs >> $GITHUB_OUTPUT]
+          echo "VERSION=$(docker run --rm -v "$(pwd):/app" -w /app php:8.2-alpine3.16 php bootstrap/getVersion.php)"|xargs >> $GITHUB_OUTPUT
 
       - name: Build and Push Image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/prod/Dockerfile
+          file: docker/production/Dockerfile
           platforms: linux/amd64
           push: true
           tags: |
             ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
             ${{ env.GITHUB_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
-          labels: |
-            coolify.managed=true
 
   aarch64:
     runs-on: [self-hosted, arm64]
@@ -78,20 +77,18 @@ jobs:
       - name: Get Version
         id: version
         run: |
-          echo "VERSION=$(docker run --rm -v "$(pwd):/app" -w /app php:8.2-alpine3.16 php bootstrap/getVersion.php)"|xargs >> $GITHUB_OUTPUT]
+          echo "VERSION=$(docker run --rm -v "$(pwd):/app" -w /app php:8.2-alpine3.16 php bootstrap/getVersion.php)"|xargs >> $GITHUB_OUTPUT
 
       - name: Build and Push Image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/prod/Dockerfile
+          file: docker/production/Dockerfile
           platforms: linux/aarch64
           push: true
           tags: |
             ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}-aarch64
             ${{ env.GITHUB_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}-aarch64
-          labels: |
-            coolify.managed=true
 
   merge-manifest:
     runs-on: ubuntu-latest

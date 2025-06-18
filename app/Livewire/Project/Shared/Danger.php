@@ -3,6 +3,7 @@
 namespace App\Livewire\Project\Shared;
 
 use App\Jobs\DeleteResourceJob;
+use App\Models\InstanceSettings;
 use App\Models\Service;
 use App\Models\ServiceApplication;
 use App\Models\ServiceDatabase;
@@ -19,7 +20,7 @@ class Danger extends Component
 
     public $projectUuid;
 
-    public $environmentName;
+    public $environmentUuid;
 
     public bool $delete_configurations = true;
 
@@ -38,7 +39,7 @@ class Danger extends Component
         $parameters = get_route_parameters();
         $this->modalId = new Cuid2;
         $this->projectUuid = data_get($parameters, 'project_uuid');
-        $this->environmentName = data_get($parameters, 'environment_name');
+        $this->environmentUuid = data_get($parameters, 'environment_uuid');
 
         if ($this->resource === null) {
             if (isset($parameters['service_uuid'])) {
@@ -61,37 +62,26 @@ class Danger extends Component
             return;
         }
 
-        switch ($this->resource->type()) {
-            case 'application':
-                $this->resourceName = $this->resource->name ?? 'Application';
-                break;
-            case 'standalone-postgresql':
-            case 'standalone-redis':
-            case 'standalone-mongodb':
-            case 'standalone-mysql':
-            case 'standalone-mariadb':
-            case 'standalone-keydb':
-            case 'standalone-dragonfly':
-            case 'standalone-clickhouse':
-                $this->resourceName = $this->resource->name ?? 'Database';
-                break;
-            case 'service':
-                $this->resourceName = $this->resource->name ?? 'Service';
-                break;
-            case 'service-application':
-                $this->resourceName = $this->resource->name ?? 'Service Application';
-                break;
-            case 'service-database':
-                $this->resourceName = $this->resource->name ?? 'Service Database';
-                break;
-            default:
-                $this->resourceName = 'Unknown Resource';
-        }
+        $this->resourceName = match ($this->resource->type()) {
+            'application' => $this->resource->name ?? 'Application',
+            'standalone-postgresql',
+            'standalone-redis',
+            'standalone-mongodb',
+            'standalone-mysql',
+            'standalone-mariadb',
+            'standalone-keydb',
+            'standalone-dragonfly',
+            'standalone-clickhouse' => $this->resource->name ?? 'Database',
+            'service' => $this->resource->name ?? 'Service',
+            'service-application' => $this->resource->name ?? 'Service Application',
+            'service-database' => $this->resource->name ?? 'Service Database',
+            default => 'Unknown Resource',
+        };
     }
 
     public function delete($password)
     {
-        if (isProduction()) {
+        if (! data_get(InstanceSettings::get(), 'disable_two_step_confirmation')) {
             if (! Hash::check($password, Auth::user()->password)) {
                 $this->addError('password', 'The provided password is incorrect.');
 
@@ -117,7 +107,7 @@ class Danger extends Component
 
             return redirect()->route('project.resource.index', [
                 'project_uuid' => $this->projectUuid,
-                'environment_name' => $this->environmentName,
+                'environment_uuid' => $this->environmentUuid,
             ]);
         } catch (\Throwable $e) {
             return handleError($e, $this);

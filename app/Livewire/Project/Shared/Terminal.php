@@ -9,6 +9,8 @@ use Livewire\Component;
 
 class Terminal extends Component
 {
+    public bool $hasShell = true;
+
     public function getListeners()
     {
         $teamId = auth()->user()->currentTeam()->id;
@@ -23,18 +25,50 @@ class Terminal extends Component
         $this->dispatch('reloadWindow');
     }
 
+    private function checkShellAvailability(Server $server, string $container): bool
+    {
+        $escapedContainer = escapeshellarg($container);
+        try {
+            instant_remote_process([
+                "docker exec {$escapedContainer} bash -c 'exit 0' 2>/dev/null || ".
+                "docker exec {$escapedContainer} sh -c 'exit 0' 2>/dev/null",
+            ], $server);
+
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
     #[On('send-terminal-command')]
     public function sendTerminalCommand($isContainer, $identifier, $serverUuid)
     {
-
         $server = Server::ownedByCurrentTeam()->whereUuid($serverUuid)->firstOrFail();
+        if (! $server->isTerminalEnabled() || $server->isForceDisabled()) {
+            abort(403, 'Terminal access is disabled on this server.');
+        }
 
         if ($isContainer) {
+            // Validate container identifier format (alphanumeric, dashes, and underscores only)
+            if (! preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/', $identifier)) {
+                throw new \InvalidArgumentException('Invalid container identifier format');
+            }
+
+            // Verify container exists and belongs to the user's team
             $status = getContainerStatus($server, $identifier);
             if ($status !== 'running') {
                 return;
             }
-            $command = SshMultiplexingHelper::generateSshCommand($server, "docker exec -it {$identifier} sh -c 'PATH=\$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && if [ -f ~/.profile ]; then . ~/.profile; fi && if [ -n \"\$SHELL\" ]; then exec \$SHELL; else sh; fi'");
+
+            // Check shell availability
+            $this->hasShell = $this->checkShellAvailability($server, $identifier);
+            if (! $this->hasShell) {
+                return;
+            }
+
+            // Escape the identifier for shell usage
+            $escapedIdentifier = escapeshellarg($identifier);
+            $command = SshMultiplexingHelper::generateSshCommand($server, "docker exec -it {$escapedIdentifier} sh -c 'PATH=\$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && if [ -f ~/.profile ]; then . ~/.profile; fi && if [ -n \"\$SHELL\" ]; then exec \$SHELL; else sh; fi'");
         } else {
             $command = SshMultiplexingHelper::generateSshCommand($server, 'PATH=$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && if [ -f ~/.profile ]; then . ~/.profile; fi && if [ -n "$SHELL" ]; then exec $SHELL; else sh; fi');
         }

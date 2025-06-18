@@ -24,7 +24,7 @@ class Index extends Component
 
     public $s3s;
 
-    protected $listeners = ['generateDockerCompose'];
+    protected $listeners = ['generateDockerCompose', 'refreshScheduledBackups' => '$refresh'];
 
     public function mount()
     {
@@ -48,7 +48,6 @@ class Index extends Component
         } catch (\Throwable $e) {
             return handleError($e, $this);
         }
-
     }
 
     public function generateDockerCompose()

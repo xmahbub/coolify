@@ -3,9 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class StandaloneMysql extends BaseModel
@@ -38,6 +36,11 @@ class StandaloneMysql extends BaseModel
             $database->scheduledBackups()->delete();
             $database->environment_variables()->delete();
             $database->tags()->detach();
+        });
+        static::saving(function ($database) {
+            if ($database->isDirty('status')) {
+                $database->forceFill(['last_online_at' => now()]);
+            }
         });
     }
 
@@ -91,7 +94,7 @@ class StandaloneMysql extends BaseModel
         return database_configuration_dir()."/{$this->uuid}";
     }
 
-    public function delete_configurations()
+    public function deleteConfigurations()
     {
         $server = data_get($this, 'destination.server');
         $workdir = $this->workdir();
@@ -100,8 +103,9 @@ class StandaloneMysql extends BaseModel
         }
     }
 
-    public function delete_volumes(Collection $persistentStorages)
+    public function deleteVolumes()
     {
+        $persistentStorages = $this->persistentStorages()->get() ?? collect();
         if ($persistentStorages->count() === 0) {
             return;
         }
@@ -165,12 +169,17 @@ class StandaloneMysql extends BaseModel
         return data_get($this, 'environment.project.team');
     }
 
+    public function sslCertificates()
+    {
+        return $this->morphMany(SslCertificate::class, 'resource');
+    }
+
     public function link()
     {
         if (data_get($this, 'environment.project.uuid')) {
             return route('project.database.configuration', [
                 'project_uuid' => data_get($this, 'environment.project.uuid'),
-                'environment_name' => data_get($this, 'environment.name'),
+                'environment_uuid' => data_get($this, 'environment.uuid'),
                 'database_uuid' => data_get($this, 'uuid'),
             ]);
         }
@@ -215,7 +224,19 @@ class StandaloneMysql extends BaseModel
     protected function internalDbUrl(): Attribute
     {
         return new Attribute(
-            get: fn () => "mysql://{$this->mysql_user}:{$this->mysql_password}@{$this->uuid}:3306/{$this->mysql_database}",
+            get: function () {
+                $encodedUser = rawurlencode($this->mysql_user);
+                $encodedPass = rawurlencode($this->mysql_password);
+                $url = "mysql://{$encodedUser}:{$encodedPass}@{$this->uuid}:3306/{$this->mysql_database}";
+                if ($this->enable_ssl) {
+                    $url .= "?ssl-mode={$this->ssl_mode}";
+                    if (in_array($this->ssl_mode, ['VERIFY_CA', 'VERIFY_IDENTITY'])) {
+                        $url .= '&ssl-ca=/etc/ssl/certs/coolify-ca.crt';
+                    }
+                }
+
+                return $url;
+            },
         );
     }
 
@@ -224,7 +245,17 @@ class StandaloneMysql extends BaseModel
         return new Attribute(
             get: function () {
                 if ($this->is_public && $this->public_port) {
-                    return "mysql://{$this->mysql_user}:{$this->mysql_password}@{$this->destination->server->getIp}:{$this->public_port}/{$this->mysql_database}";
+                    $encodedUser = rawurlencode($this->mysql_user);
+                    $encodedPass = rawurlencode($this->mysql_password);
+                    $url = "mysql://{$encodedUser}:{$encodedPass}@{$this->destination->server->getIp}:{$this->public_port}/{$this->mysql_database}";
+                    if ($this->enable_ssl) {
+                        $url .= "?ssl-mode={$this->ssl_mode}";
+                        if (in_array($this->ssl_mode, ['VERIFY_CA', 'VERIFY_IDENTITY'])) {
+                            $url .= '&ssl-ca=/etc/ssl/certs/coolify-ca.crt';
+                        }
+                    }
+
+                    return $url;
                 }
 
                 return null;
@@ -247,14 +278,9 @@ class StandaloneMysql extends BaseModel
         return $this->morphTo();
     }
 
-    public function environment_variables(): HasMany
+    public function runtime_environment_variables()
     {
-        return $this->hasMany(EnvironmentVariable::class);
-    }
-
-    public function runtime_environment_variables(): HasMany
-    {
-        return $this->hasMany(EnvironmentVariable::class);
+        return $this->morphMany(EnvironmentVariable::class, 'resourceable');
     }
 
     public function persistentStorages()
@@ -276,7 +302,7 @@ class StandaloneMysql extends BaseModel
         if (str($metrics)->contains('error')) {
             $error = json_decode($metrics, true);
             $error = data_get($error, 'error', 'Something is not okay, are you okay?');
-            if ($error == 'Unauthorized') {
+            if ($error === 'Unauthorized') {
                 $error = 'Unauthorized, please check your metrics token or restart Sentinel to set a new token.';
             }
             throw new \Exception($error);
@@ -298,7 +324,7 @@ class StandaloneMysql extends BaseModel
         if (str($metrics)->contains('error')) {
             $error = json_decode($metrics, true);
             $error = data_get($error, 'error', 'Something is not okay, are you okay?');
-            if ($error == 'Unauthorized') {
+            if ($error === 'Unauthorized') {
                 $error = 'Unauthorized, please check your metrics token or restart Sentinel to set a new token.';
             }
             throw new \Exception($error);
@@ -314,5 +340,11 @@ class StandaloneMysql extends BaseModel
     public function isBackupSolutionAvailable()
     {
         return true;
+    }
+
+    public function environment_variables()
+    {
+        return $this->morphMany(EnvironmentVariable::class, 'resourceable')
+            ->orderBy('key', 'asc');
     }
 }

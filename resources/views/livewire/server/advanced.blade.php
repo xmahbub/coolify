@@ -1,84 +1,83 @@
-<form wire:submit='submit'>
-    <div>
-        <div class="flex items-center gap-2">
-            <h2>Advanced</h2>
-            <x-forms.button type="submit">Save</x-forms.button>
-            <x-modal-confirmation title="Confirm Docker Cleanup?" buttonTitle="Trigger Manual Cleanup"
-                submitAction="manualCleanup" :actions="[
-                    'Permanently deletes all stopped containers managed by Coolify (as containers are non-persistent, no data will be lost)',
-                    'Permanently deletes all unused images',
-                    'Clears build cache',
-                    'Removes old versions of the Coolify helper image',
-                    'Optionally permanently deletes all unused volumes (if enabled in advanced options).',
-                    'Optionally permanently deletes all unused networks (if enabled in advanced options).',
-                ]" :confirmWithText="false" :confirmWithPassword="false"
-                step2ButtonText="Trigger Docker Cleanup" />
-        </div>
-        <div>Advanced configuration for your server.</div>
-    </div>
-    <div class="flex flex-col gap-4 pt-4">
-        <div class="flex flex-col gap-2">
-            <div class="flex items-center gap-2">
-                <h3>Docker Cleanup</h3>
-
+<div>
+    <x-slot:title>
+        {{ data_get_str($server, 'name')->limit(10) }} > Advanced | Coolify
+    </x-slot>
+    <livewire:server.navbar :server="$server" />
+    <div x-data="{ activeTab: window.location.hash ? window.location.hash.substring(1) : 'general' }" class="flex flex-col h-full gap-8 sm:flex-row">
+        <x-server.sidebar :server="$server" activeMenu="advanced" />
+        <form wire:submit='submit' class="w-full">
+            <div>
+                <div class="flex items-center gap-2">
+                    <h2>Advanced</h2>
+                    <x-forms.button type="submit">Save</x-forms.button>
+                </div>
+                <div class="mb-4">Advanced configuration for your server.</div>
             </div>
-            <div class="flex flex-wrap items-center gap-4">
-                @if ($server->settings->force_docker_cleanup)
-                    <x-forms.input placeholder="*/10 * * * *" id="server.settings.docker_cleanup_frequency"
-                        label="Docker cleanup frequency" required
-                        helper="Cron expression for Docker Cleanup.<br>You can use every_minute, hourly, daily, weekly, monthly, yearly.<br><br>Default is every night at midnight." />
+
+            <div class="flex items-center gap-2">
+                <h3>Terminal Access</h3>
+                <x-helper
+                    helper="Control whether terminal access is available for this server and its containers.<br/>Only team
+                    administrators and owners can modify this setting." />
+                @if ($isTerminalEnabled)
+                    <span
+                        class="px-2 py-1 text-xs font-semibold text-green-800 bg-green-100 rounded dark:text-green-100 dark:bg-green-800">
+                        Enabled
+                    </span>
                 @else
-                    <x-forms.input id="server.settings.docker_cleanup_threshold" label="Docker cleanup threshold (%)"
-                        required
-                        helper="The Docker cleanup tasks will run when the disk usage exceeds this threshold." />
+                    <span
+                        class="px-2 py-1 text-xs font-semibold text-red-800 bg-red-100 rounded dark:text-red-100 dark:bg-red-800">
+                        Disabled
+                    </span>
                 @endif
-                <div class="w-96">
-                    <x-forms.checkbox
-                        helper="Enabling Force Docker Cleanup or manually triggering a cleanup will perform the following actions:
-                        <ul class='list-disc pl-4 mt-2'>
-                            <li>Removes stopped containers manged by Coolify (as containers are none persistent, no data will be lost).</li>
-                            <li>Deletes unused images.</li>
-                            <li>Clears build cache.</li>
-                            <li>Removes old versions of the Coolify helper image.</li>
-                            <li>Optionally delete unused volumes (if enabled in advanced options).</li>
-                            <li>Optionally remove unused networks (if enabled in advanced options).</li>
-                        </ul>"
-                        instantSave id="server.settings.force_docker_cleanup" label="Force Docker Cleanup" />
+            </div>
+            <div class="flex flex-col gap-4">
+                <div class="flex items-center gap-4 pt-4">
+                    @if (auth()->user()->isAdmin())
+                        <div wire:key="terminal-access-change-{{ $isTerminalEnabled }}" class="pb-4">
+                            <x-modal-confirmation title="Confirm Terminal Access Change?"
+                                temporaryDisableTwoStepConfirmation
+                                buttonTitle="{{ $isTerminalEnabled ? 'Disable Terminal' : 'Enable Terminal' }}"
+                                submitAction="toggleTerminal" :actions="[
+                                    $isTerminalEnabled
+                                        ? 'This will disable terminal access for this server and all its containers.'
+                                        : 'This will enable terminal access for this server and all its containers.',
+                                    $isTerminalEnabled
+                                        ? 'Users will no longer be able to access terminal views from the UI.'
+                                        : 'Users will be able to access terminal views from the UI.',
+                                    'This change will take effect immediately.',
+                                ]" confirmationText="{{ $server->name }}"
+                                shortConfirmationLabel="Server Name"
+                                step3ButtonText="{{ $isTerminalEnabled ? 'Disable Terminal' : 'Enable Terminal' }}">
+                            </x-modal-confirmation>
+                        </div>
+                    @endif
+                </div>
+            </div>
+
+            <h3>Disk Usage</h3>
+            <div class="flex flex-col gap-6">
+                <div class="flex flex-col">
+                    <div class="flex flex-wrap gap-2 sm:flex-nowrap pt-4">
+                        <x-forms.input placeholder="0 23 * * *" id="serverDiskUsageCheckFrequency"
+                            label="Disk usage check frequency" required
+                            helper="Cron expression for disk usage check frequency.<br>You can use every_minute, hourly, daily, weekly, monthly, yearly.<br><br>Default is every night at 11:00 PM." />
+                        <x-forms.input id="serverDiskUsageNotificationThreshold"
+                            label="Server disk usage notification threshold (%)" required
+                            helper="If the server disk usage exceeds this threshold, Coolify will send a notification to the team members." />
+                    </div>
                 </div>
 
+                <div class="flex flex-col">
+                    <h3>Builds</h3>
+                    <div class="flex flex-wrap gap-2 sm:flex-nowrap pt-4">
+                        <x-forms.input id="concurrentBuilds" label="Number of concurrent builds" required
+                            helper="You can specify the number of simultaneous build processes/deployments that should run concurrently." />
+                        <x-forms.input id="dynamicTimeout" label="Deployment timeout (seconds)" required
+                            helper="You can define the maximum duration for a deployment to run before timing it out." />
+                    </div>
+                </div>
             </div>
-            <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                <span class="dark:text-warning font-bold">Warning: Enable these
-                    options only if you fully understand their implications and
-                    consequences!</span><br>Improper use will result in data loss and could cause
-                functional issues.
-            </p>
-            <div class="w-96">
-                <x-forms.checkbox instantSave id="server.settings.delete_unused_volumes" label="Delete Unused Volumes"
-                    helper="This option will remove all unused Docker volumes during cleanup.<br><br><strong>Warning: Data form stopped containers will be lost!</strong><br><br>Consequences include:<br>
-            <ul class='list-disc pl-4 mt-2'>
-                <li>Volumes not attached to running containers will be deleted and data will be permanently lost (stopped containers are affected).</li>
-                <li>Data from stopped containers volumes will be permanently lost.</li>
-                <li>No way to recover deleted volume data.</li>
-            </ul>" />
-                <x-forms.checkbox instantSave id="server.settings.delete_unused_networks" label="Delete Unused Networks"
-                    helper="This option will remove all unused Docker networks during cleanup.<br><br><strong>Warning: Functionality may be lost and containers may not be able to communicate with each other!</strong><br><br>Consequences include:<br>
-            <ul class='list-disc pl-4 mt-2'>
-                <li>Networks not attached to running containers will be permanently deleted (stopped containers are affected).</li>
-                <li>Custom networks for stopped containers will be permanently deleted.</li>
-                <li>Functionality may be lost and containers may not be able to communicate with each other.</li>
-            </ul>" />
-            </div>
-        </div>
-        <div class="flex flex-col">
-            <h3>Builds</h3>
-            <div>Customize the build process.</div>
-            <div class="flex flex-wrap gap-2 sm:flex-nowrap pt-4">
-                <x-forms.input id="server.settings.concurrent_builds" label="Number of concurrent builds" required
-                    helper="You can specify the number of simultaneous build processes/deployments that should run concurrently." />
-                <x-forms.input id="server.settings.dynamic_timeout" label="Deployment timeout (seconds)" required
-                    helper="You can define the maximum duration for a deployment to run before timing it out." />
-            </div>
-        </div>
+        </form>
     </div>
-</form>
+</div>

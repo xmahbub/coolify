@@ -21,14 +21,13 @@ function invalidTokenResponse()
 function serializeApiResponse($data)
 {
     if ($data instanceof Collection) {
-        $data = $data->map(function ($d) {
+        return $data->map(function ($d) {
             $d = collect($d)->sortKeys();
             $created_at = data_get($d, 'created_at');
             $updated_at = data_get($d, 'updated_at');
             if ($created_at) {
                 unset($d['created_at']);
                 $d['created_at'] = $created_at;
-
             }
             if ($updated_at) {
                 unset($d['updated_at']);
@@ -50,8 +49,6 @@ function serializeApiResponse($data)
 
             return $d;
         });
-
-        return $data;
     } else {
         $d = collect($data)->sortKeys();
         $created_at = data_get($d, 'created_at');
@@ -59,7 +56,6 @@ function serializeApiResponse($data)
         if ($created_at) {
             unset($d['created_at']);
             $d['created_at'] = $created_at;
-
         }
         if ($updated_at) {
             unset($d['updated_at']);
@@ -170,6 +166,7 @@ function removeUnnecessaryFieldsFromRequest(Request $request)
 {
     $request->offsetUnset('project_uuid');
     $request->offsetUnset('environment_name');
+    $request->offsetUnset('environment_uuid');
     $request->offsetUnset('destination_uuid');
     $request->offsetUnset('server_uuid');
     $request->offsetUnset('type');

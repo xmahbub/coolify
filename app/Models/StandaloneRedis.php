@@ -3,9 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class StandaloneRedis extends BaseModel
@@ -33,6 +31,17 @@ class StandaloneRedis extends BaseModel
             $database->scheduledBackups()->delete();
             $database->environment_variables()->delete();
             $database->tags()->detach();
+        });
+        static::saving(function ($database) {
+            if ($database->isDirty('status')) {
+                $database->forceFill(['last_online_at' => now()]);
+            }
+        });
+
+        static::retrieved(function ($database) {
+            if (! $database->redis_username) {
+                $database->redis_username = 'default';
+            }
         });
     }
 
@@ -86,7 +95,7 @@ class StandaloneRedis extends BaseModel
         return database_configuration_dir()."/{$this->uuid}";
     }
 
-    public function delete_configurations()
+    public function deleteConfigurations()
     {
         $server = data_get($this, 'destination.server');
         $workdir = $this->workdir();
@@ -95,8 +104,9 @@ class StandaloneRedis extends BaseModel
         }
     }
 
-    public function delete_volumes(Collection $persistentStorages)
+    public function deleteVolumes()
     {
+        $persistentStorages = $this->persistentStorages()->get() ?? collect();
         if ($persistentStorages->count() === 0) {
             return;
         }
@@ -160,12 +170,17 @@ class StandaloneRedis extends BaseModel
         return data_get($this, 'environment.project.team');
     }
 
+    public function sslCertificates()
+    {
+        return $this->morphMany(SslCertificate::class, 'resource');
+    }
+
     public function link()
     {
         if (data_get($this, 'environment.project.uuid')) {
             return route('project.database.configuration', [
                 'project_uuid' => data_get($this, 'environment.project.uuid'),
-                'environment_name' => data_get($this, 'environment.name'),
+                'environment_uuid' => data_get($this, 'environment.uuid'),
                 'database_uuid' => data_get($this, 'uuid'),
             ]);
         }
@@ -189,8 +204,8 @@ class StandaloneRedis extends BaseModel
     {
         return Attribute::make(
             get: fn () => is_null($this->ports_mappings)
-                ? []
-                : explode(',', $this->ports_mappings),
+            ? []
+            : explode(',', $this->ports_mappings),
 
         );
     }
@@ -212,9 +227,17 @@ class StandaloneRedis extends BaseModel
         return new Attribute(
             get: function () {
                 $redis_version = $this->getRedisVersion();
-                $username_part = version_compare($redis_version, '6.0', '>=') ? "{$this->redis_username}:" : '';
+                $username_part = version_compare($redis_version, '6.0', '>=') ? rawurlencode($this->redis_username).':' : '';
+                $encodedPass = rawurlencode($this->redis_password);
+                $scheme = $this->enable_ssl ? 'rediss' : 'redis';
+                $port = $this->enable_ssl ? 6380 : 6379;
+                $url = "{$scheme}://{$username_part}{$encodedPass}@{$this->uuid}:{$port}/0";
 
-                return "redis://{$username_part}{$this->redis_password}@{$this->uuid}:6379/0";
+                if ($this->enable_ssl && $this->ssl_mode === 'verify-ca') {
+                    $url .= '?cacert=/etc/ssl/certs/coolify-ca.crt';
+                }
+
+                return $url;
             }
         );
     }
@@ -225,9 +248,16 @@ class StandaloneRedis extends BaseModel
             get: function () {
                 if ($this->is_public && $this->public_port) {
                     $redis_version = $this->getRedisVersion();
-                    $username_part = version_compare($redis_version, '6.0', '>=') ? "{$this->redis_username}:" : '';
+                    $username_part = version_compare($redis_version, '6.0', '>=') ? rawurlencode($this->redis_username).':' : '';
+                    $encodedPass = rawurlencode($this->redis_password);
+                    $scheme = $this->enable_ssl ? 'rediss' : 'redis';
+                    $url = "{$scheme}://{$username_part}{$encodedPass}@{$this->destination->server->getIp}:{$this->public_port}/0";
 
-                    return "redis://{$username_part}{$this->redis_password}@{$this->destination->server->getIp}:{$this->public_port}/0";
+                    if ($this->enable_ssl && $this->ssl_mode === 'verify-ca') {
+                        $url .= '?cacert=/etc/ssl/certs/coolify-ca.crt';
+                    }
+
+                    return $url;
                 }
 
                 return null;
@@ -257,14 +287,9 @@ class StandaloneRedis extends BaseModel
         return $this->morphTo();
     }
 
-    public function environment_variables(): HasMany
+    public function runtime_environment_variables()
     {
-        return $this->hasMany(EnvironmentVariable::class);
-    }
-
-    public function runtime_environment_variables(): HasMany
-    {
-        return $this->hasMany(EnvironmentVariable::class);
+        return $this->morphMany(EnvironmentVariable::class, 'resourceable');
     }
 
     public function persistentStorages()
@@ -286,7 +311,7 @@ class StandaloneRedis extends BaseModel
         if (str($metrics)->contains('error')) {
             $error = json_decode($metrics, true);
             $error = data_get($error, 'error', 'Something is not okay, are you okay?');
-            if ($error == 'Unauthorized') {
+            if ($error === 'Unauthorized') {
                 $error = 'Unauthorized, please check your metrics token or restart Sentinel to set a new token.';
             }
             throw new \Exception($error);
@@ -308,7 +333,7 @@ class StandaloneRedis extends BaseModel
         if (str($metrics)->contains('error')) {
             $error = json_decode($metrics, true);
             $error = data_get($error, 'error', 'Something is not okay, are you okay?');
-            if ($error == 'Unauthorized') {
+            if ($error === 'Unauthorized') {
                 $error = 'Unauthorized, please check your metrics token or restart Sentinel to set a new token.';
             }
             throw new \Exception($error);
@@ -347,11 +372,22 @@ class StandaloneRedis extends BaseModel
             get: function () {
                 $username = $this->runtime_environment_variables()->where('key', 'REDIS_USERNAME')->first();
                 if (! $username) {
-                    return null;
+                    $this->runtime_environment_variables()->create([
+                        'key' => 'REDIS_USERNAME',
+                        'value' => 'default',
+                    ]);
+
+                    return 'default';
                 }
 
                 return $username->value;
             }
         );
+    }
+
+    public function environment_variables()
+    {
+        return $this->morphMany(EnvironmentVariable::class, 'resourceable')
+            ->orderBy('key', 'asc');
     }
 }
